@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Publish guard — pre-commit. Blocks personal/machine data and never-commit
+# files from entering the tree. Personal patterns are read from a gitignored
+# .publish-guard.local (seeded from .publish-guard.local.example).
+# Override once, intentionally: git commit --no-verify
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+[ -z "$staged" ] && exit 0
+
+fail=0
+
+# 1. Never-commit files (regardless of .gitignore state).
+while IFS= read -r f; do
+  case "$f" in
+    .env|.env.*|*.local|op-refs.local.sh|*settings.local.json|state.json|jobs|*/auth.json|*.log)
+      [ "$f" = ".env.example" ] && continue
+      echo "pre-commit: refusing to commit '$f' (machine-specific / secret)." >&2
+      fail=1 ;;
+  esac
+done <<< "$staged"
+
+# 2. Personal-pattern scan of staged content.
+local_cfg="$repo_root/.publish-guard.local"
+if [ -f "$local_cfg" ]; then
+  patterns="$(grep -vE '^\s*(#|$)' "$local_cfg" || true)"
+  if [ -n "$patterns" ]; then
+    while IFS= read -r f; do
+      [ -f "$repo_root/$f" ] || continue
+      while IFS= read -r pat; do
+        [ -z "$pat" ] && continue
+        if git show ":$f" 2>/dev/null | grep -nE -- "$pat" >/dev/null 2>&1; then
+          echo "pre-commit: '$f' contains a personal pattern (/$pat/)." >&2
+          fail=1
+        fi
+      done <<< "$patterns"
+    done <<< "$staged"
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "pre-commit: blocked. Fix the above or, if truly intended, --no-verify." >&2
+  exit 1
+fi
+
+# 3. Repo-specific extension: chain the auth/secrets leak guard. The two
+#    concerns (personal/CV copy above; auth/op-fetch leaks below) are
+#    enforced through this one hook so neither side can regress on commit.
+if [ -x "$repo_root/scripts/check-secrets.sh" ]; then
+  "$repo_root/scripts/check-secrets.sh"
+fi
+exit 0

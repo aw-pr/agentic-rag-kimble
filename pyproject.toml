@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "agentic-rag-kimble"
+version = "0.1.0"
+description = "Agentic RAG with Kimball-structured property graph over OpenML experimental data"
+requires-python = ">=3.11"
+keywords = ["llm", "rag", "agentic", "anthropic", "claude", "knowledge-graph", "openml", "evaluation"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--cov=src --cov-report=term-missing"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+# strict = true removed deliberately: full --strict has low ROI at the dynamic
+# SDK / property-graph boundaries (claude-agent-sdk, ladybug, openml all return
+# loosely-typed results). We type our own logic and check it at this pragmatic
+# baseline rather than littering the codebase with casts and type: ignore.

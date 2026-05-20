@@ -1,0 +1,33 @@
+# Copy to .publish-guard.local (gitignored) and list ERE regex patterns, one
+# per line, that must never appear in a committed file. The pre-commit hook
+# (scripts/git-hooks/pre-commit) reads this file. Blank lines and #-comments
+# are ignored. These are YOUR machine specifics — keep them out of the tree.
+#
+# Examples (replace with your own; do NOT commit the real values):
+# /Users/yourname
+# /home/yourname
+# op://your-private-vault
+# your-github-username
+# you@example\.com
+#
+# Recruiter / CV positioning copy must never reach the public mirror.
+# A section-heading marker is the most stable pattern; phrase markers
+# work too if the wording is distinctive enough. Examples (use real
+# values in your .local, never here — the patterns in this file would
+# match themselves and trip the gate):
+# ^## CV bullet
+# ^## CV section
+# <distinctive-recruiter-keyword>
+# <distinctive-rate-phrase>
+#
+# ---------------------------------------------------------------------------
+# Publish gate (separate mechanism — configured via `git config`, NOT here):
+#   git config publishguard.publicmatch  'YOUR_ORG/YOUR_REPO'   # required
+#   git config publishguard.publicremote 'YOUR_PUBLIC_REMOTE'   # required
+#   git config publishguard.publishbranch 'publish'             # required
+#   git config publishguard.privateremote 'origin'              # optional
+#   git config publishguard.sentinel     'PUBLISH_GUARD_OK'     # optional
+# scripts/install-guards.sh wires the `git publish` alias from these and the
+# pre-push hook fails closed: a direct push of the default branch to the
+# public remote is blocked unless it comes via `git publish` (which backs up
+# to the private remote first). Deliberate override: git push --no-verify

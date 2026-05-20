@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Publish guard — pre-push. Fail-closed gate for a public mirror.
+#
+# Per-repo config (git config, local, never committed — keeps org/repo names
+# out of the tracked tree):
+#   publishguard.publicmatch  Substring of the PUBLIC remote URL (e.g.
+#                             "myorg/myrepo"). Unset → this hook is inert.
+#   publishguard.sentinel     Env var the sanctioned publish path sets to 1.
+#                             Default: PUBLISH_GUARD_OK
+#
+# On the public remote: only the default branch (main/master) may be pushed,
+# AND that push must arrive via the sanctioned path (sentinel env set) — i.e.
+# `git publish`, which backs up to the private remote first. A direct
+# `git push <public> dev:main` is blocked so it cannot skip that backup.
+# Deliberate one-off override: git push --no-verify
+remote_name="$1"
+remote_url="$2"
+
+pub_match="$(git config --get publishguard.publicmatch || true)"
+[ -z "$pub_match" ] && exit 0                 # not configured → nothing to guard
+case "$remote_url" in
+  *"$pub_match"*) : ;;                         # public — restricted below
+  *) exit 0 ;;                                 # private/backup — allow everything
+esac
+
+sentinel="$(git config --get publishguard.sentinel || true)"
+[ -z "$sentinel" ] && sentinel="PUBLISH_GUARD_OK"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    "")
+      : ;;
+    refs/heads/main|refs/heads/master)
+      if [ "${!sentinel:-}" != "1" ]; then
+        echo "pre-push: direct publish to PUBLIC remote '$remote_name' blocked." >&2
+        echo "          Run 'git publish' — it backs up to the private remote" >&2
+        echo "          first, then publishes. Deliberate override: --no-verify." >&2
+        exit 1
+      fi ;;
+    *)
+      echo "pre-push: '$remote_ref' blocked on PUBLIC remote '$remote_name'." >&2
+      echo "          Only the default branch is public. Override: --no-verify." >&2
+      exit 1 ;;
+  esac
+done
+exit 0
