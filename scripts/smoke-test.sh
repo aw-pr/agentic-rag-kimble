@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "=== strict publish guard ==="
+./scripts/publish-guard-strict-scan.sh
+
 echo "=== leak guard ==="
 ./scripts/check-secrets.sh
 

@@ -20,32 +20,32 @@ from src.ui.app import format_stats, highlight_citations
 
 def test_highlight_wraps_algorithm_citation():
     result = highlight_citations("See [Algorithm: RandomForest] for details.")
-    assert '<span style="background:#fff4a3' in result
+    assert '<span style="background:rgba(251,191,36,0.18)' in result
     assert "[Algorithm: RandomForest]" in result
 
 
 def test_highlight_wraps_dataset_citation():
     result = highlight_citations("Benchmark: [Dataset: iris].")
     assert "[Dataset: iris]" in result
-    assert "background:#fff4a3" in result
+    assert "background:rgba(251,191,36,0.18)" in result
 
 
 def test_highlight_wraps_run_citation():
     result = highlight_citations("[Run: 123456] achieved 0.94.")
     assert "[Run: 123456]" in result
-    assert "background:#fff4a3" in result
+    assert "background:rgba(251,191,36,0.18)" in result
 
 
 def test_highlight_wraps_task_citation():
     result = highlight_citations("[Task: Supervised Classification] task.")
     assert "[Task: Supervised Classification]" in result
-    assert "background:#fff4a3" in result
+    assert "background:rgba(251,191,36,0.18)" in result
 
 
 def test_highlight_multiple_citations():
     text = "[Algorithm: SVM] on [Dataset: digits] in [Run: 99]"
     result = highlight_citations(text)
-    assert result.count("background:#fff4a3") == 3
+    assert result.count("background:rgba(251,191,36,0.18)") == 3
 
 
 def test_highlight_no_citations_passthrough():

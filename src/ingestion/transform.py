@@ -404,13 +404,18 @@ def transform_run(fetched: FetchedRun, flow_name: str) -> tuple[dict, dict]:
     f1 = _safe_float(evals.get("f1") or evals.get("f_measure"))
     auc = _safe_float(evals.get("area_under_roc_curve") or evals.get("auc"))
 
+    # OpenML reports CPU training time in milliseconds; the Run schema
+    # stores seconds, so convert at the boundary.
+    runtime_ms = _safe_float(evals.get("usercpu_time_millis_training"))
+    runtime_sec = runtime_ms / 1000.0 if runtime_ms is not None else None
+
     run_dict = {
         "run_id": int(fetched.run_id),
         "setup_id": int(fetched.setup_id),
         "accuracy": accuracy,
         "f1": f1,
         "auc": auc,
-        "runtime_sec": _safe_float(evals.get("usercpu_time_millis_training")),
+        "runtime_sec": runtime_sec,
         "memory_mb": None,
     }
     algorithm_dict = transform_algorithm(fetched.flow_id, flow_name)

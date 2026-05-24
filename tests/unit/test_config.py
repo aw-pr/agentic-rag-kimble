@@ -35,7 +35,7 @@ def test_openml_max_datasets_default():
 
 def test_agent_max_tool_calls_default():
     cfg = Config()
-    assert cfg.agent_max_tool_calls == 5
+    assert cfg.agent_max_tool_calls == 15
 
 
 def test_embedding_model_default():

@@ -15,7 +15,9 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from claude_agent_sdk import (
@@ -42,9 +44,15 @@ from src.retrieval.tools import dispatch_tool
 class AgentResponse:
     query: str
     answer: str
-    tool_calls: list[dict]    # [{name, input, result_preview, result}]
+    tool_calls: list[dict]    # [{name, input, result_preview, result, duration_ms}]
     citations: list[str]      # extracted from answer text
     total_tool_calls: int
+    # Cost / usage telemetry from the SDK's ResultMessage. Defaults keep
+    # synthetic AgentResponse fixtures in tests working unchanged.
+    usage: dict[str, int] = field(default_factory=dict)
+    num_turns: int = 0
+    duration_ms: int = 0
+    model_usage: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -54,14 +62,20 @@ class AgentResponse:
 # _config is set before each SDK call in _run_query_async().
 # ---------------------------------------------------------------------------
 
-# Module-level config reference — set per-call in _run_query_async
-_current_config: Config | None = None
+# Per-task config reference — set via ContextVar in _run_query_async so that
+# concurrent asyncio tasks (e.g. two Streamlit sessions) each see their own value.
+_current_config: ContextVar[Config | None] = ContextVar("_current_config", default=None)
 
 
 def _require_config() -> Config:
-    """Return the per-call config, asserting it was set by _run_query_async."""
-    assert _current_config is not None, "Config not set before tool dispatch."
-    return _current_config
+    """Return the per-task config; raise if _run_query_async hasn't set it."""
+    cfg = _current_config.get()
+    if cfg is None:
+        raise RuntimeError(
+            "_current_config is not set. _require_config() must only be called "
+            "from within an active _run_query_async task."
+        )
+    return cfg
 
 
 @tool(
@@ -150,8 +164,7 @@ def run_query(query: str, config: Config) -> AgentResponse:
 
 async def _run_query_async(user_query: str, config: Config) -> AgentResponse:
     """Async implementation — called by run_query()."""
-    global _current_config
-    _current_config = config
+    token = _current_config.set(config)
 
     # Build in-process MCP server with our three tools
     mcp_server = create_sdk_mcp_server(
@@ -161,8 +174,9 @@ async def _run_query_async(user_query: str, config: Config) -> AgentResponse:
     )
 
     # max_turns in the SDK counts every exchange (user + assistant), not just
-    # tool calls. Allow 2 turns per tool call plus 2 for the final answer.
-    max_turns = config.agent_max_tool_calls * 2 + 2
+    # tool calls. Allow 3 turns per tool call (model often interleaves a brief
+    # reasoning turn between tool calls) plus 2 for the final answer.
+    max_turns = config.agent_max_tool_calls * 3 + 2
 
     options = ClaudeAgentOptions(
         model=config.claude_model,
@@ -175,50 +189,101 @@ async def _run_query_async(user_query: str, config: Config) -> AgentResponse:
     tool_calls_log: list[dict] = []
     answer_text = ""
     total_tool_calls = 0
+    usage: dict[str, int] = {}
+    num_turns = 0
+    duration_ms = 0
+    model_usage: dict[str, dict[str, Any]] = {}
+    t0 = perf_counter()
 
-    async for msg in sdk_query(prompt=user_query, options=options):
-        if isinstance(msg, AssistantMessage):
-            for block in msg.content:
-                if isinstance(block, ToolUseBlock):
-                    total_tool_calls += 1
-                    # Capture a preview of the tool input for the log.
-                    # result_preview kept for UI backward compat; result filled below.
-                    input_preview = json.dumps(block.input)[:200]
-                    tool_calls_log.append({
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input,
-                        "result_preview": input_preview,
-                        "result": None,
-                    })
-                elif isinstance(block, TextBlock):
-                    # Accumulate text — the final assistant turn text is what
-                    # we want; overwrite so we end up with the last one
-                    answer_text = block.text
+    try:
+        async for msg in sdk_query(prompt=user_query, options=options):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, ToolUseBlock):
+                        total_tool_calls += 1
+                        input_preview = json.dumps(block.input)[:200]
+                        tool_calls_log.append({
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input,
+                            "result_preview": input_preview,
+                            "result": None,
+                            "t_start": perf_counter(),
+                            "duration_ms": None,
+                        })
+                    elif isinstance(block, TextBlock):
+                        answer_text = block.text
 
-        elif isinstance(msg, UserMessage):
-            # UserMessage carries ToolResultBlocks — the actual tool outputs
-            # the model saw. Correlate by tool_use_id to fill result.
-            for ublock in msg.content:
-                if isinstance(ublock, ToolResultBlock):
-                    result_str = str(ublock.content)[:1000]
-                    for tc in tool_calls_log:
-                        if tc.get("id") == ublock.tool_use_id:
-                            tc["result"] = result_str
-                            break
+            elif isinstance(msg, UserMessage):
+                for ublock in msg.content:
+                    if isinstance(ublock, ToolResultBlock):
+                        result_str = str(ublock.content)[:1000]
+                        for tc in tool_calls_log:
+                            if tc.get("id") == ublock.tool_use_id:
+                                tc["result"] = result_str
+                                t_start = tc.pop("t_start", None)
+                                if t_start is not None:
+                                    tc["duration_ms"] = int((perf_counter() - t_start) * 1000)
+                                break
 
-        elif isinstance(msg, ResultMessage):
-            # ResultMessage.result holds the final text output
-            if msg.result:
-                answer_text = msg.result
+            elif isinstance(msg, ResultMessage):
+                if msg.result:
+                    answer_text = msg.result
+                usage = dict(msg.usage) if msg.usage else {}
+                num_turns = int(msg.num_turns or 0)
+                duration_ms = int(msg.duration_ms or 0)
+                model_usage = dict(msg.model_usage) if msg.model_usage else {}
+    finally:
+        _current_config.reset(token)
 
-    return AgentResponse(
+    # Fallback wall-clock if the SDK didn't surface duration_ms.
+    if duration_ms == 0:
+        duration_ms = int((perf_counter() - t0) * 1000)
+
+    # Drop any lingering t_start keys before returning (tool result never arrived).
+    for tc in tool_calls_log:
+        tc.pop("t_start", None)
+
+    response = AgentResponse(
         query=user_query,
         answer=answer_text,
         tool_calls=tool_calls_log,
         citations=extract_citations(answer_text),
         total_tool_calls=total_tool_calls,
+        usage=usage,
+        num_turns=num_turns,
+        duration_ms=duration_ms,
+        model_usage=model_usage,
     )
+
+    # Best-effort cost log; never raise out of run_query for telemetry failure.
+    try:
+        from src.agent.cost_log import log_response
+        log_response(response, model=config.claude_model)
+    except OSError:
+        pass
+
+    return response
+
+
+def _check_claude_code_available() -> None:
+    """Friendly precondition check for the Claude Code OAuth session.
+
+    The Claude Agent SDK invokes the `claude` CLI to use its OAuth session.
+    If the CLI is missing or unauthenticated, the SDK raises deep into its
+    own internals — this surfaces the problem early with an actionable line.
+    """
+    import shutil
+    import sys
+
+    if shutil.which("claude") is None:
+        sys.stderr.write(
+            "orchestrator: 'claude' CLI not found on PATH.\n"
+            "  Install Claude Code from https://claude.com/code, then run\n"
+            "  `claude /login` once to authenticate. The agent SDK uses\n"
+            "  that OAuth session — no API key needed.\n"
+        )
+        sys.exit(2)
 
 
 if __name__ == "__main__":
@@ -227,10 +292,39 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Agentic RAG query runner")
     parser.add_argument("--query", required=False, help="Single query to run")
     parser.add_argument("--interactive", action="store_true", help="Interactive REPL mode")
+    parser.add_argument("--check-auth", action="store_true", help="Verify Claude Code is available, then exit")
     args = parser.parse_args()
+
+    _check_claude_code_available()
+    if args.check_auth:
+        print("claude CLI present on PATH; SDK will use its OAuth session.")
+        raise SystemExit(0)
 
     from src.config import get_config
     cfg = get_config()
+
+    def _cost_line(resp: AgentResponse) -> str:
+        u = resp.usage or {}
+        in_tok = u.get("input_tokens", 0)
+        out_tok = u.get("output_tokens", 0)
+        cache_read = u.get("cache_read_input_tokens", 0)
+        total = in_tok + out_tok
+        parts = [
+            f"{resp.total_tool_calls} tool calls",
+            f"{in_tok:,} in / {out_tok:,} out tokens ({total:,} total)",
+        ]
+        if cache_read:
+            parts.append(f"cache hit {cache_read:,}")
+        parts.append(f"{resp.num_turns} turns")
+        parts.append(f"{resp.duration_ms / 1000:.1f}s")
+        # Per-model token breakdown when the SDK splits across models.
+        if resp.model_usage:
+            for model_id, agg in resp.model_usage.items():
+                m_in = int(agg.get("input_tokens", 0) or 0)
+                m_out = int(agg.get("output_tokens", 0) or 0)
+                if m_in or m_out:
+                    parts.append(f"{model_id}: {m_in:,} in / {m_out:,} out")
+        return "[" + " | ".join(parts) + "]"
 
     if args.interactive:
         print("Agentic RAG — type 'quit' to exit")
@@ -240,11 +334,10 @@ if __name__ == "__main__":
                 break
             resp = run_query(q, cfg)
             print(f"\n{resp.answer}")
-            print(f"\n[{resp.total_tool_calls} tool calls | {len(resp.citations)} citations]")
+            print(f"\n{_cost_line(resp)}")
     elif args.query:
         resp = run_query(args.query, cfg)
         print(resp.answer)
-        if resp.tool_calls:
-            print(f"\n[{resp.total_tool_calls} tool calls]")
+        print(f"\n{_cost_line(resp)}")
     else:
         parser.print_help()

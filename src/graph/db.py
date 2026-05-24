@@ -20,8 +20,9 @@ from src.graph.schema import create_schema, drop_schema
 
 # Words that indicate a write operation. Matched as whole words so that
 # identifiers like "created_at" do not trigger a false positive.
-_WRITE_KEYWORDS = re.compile(
-    r"\b(CREATE|MERGE|DELETE|SET|DROP)\b",
+# Single authoritative source — imported by src.retrieval.graph_tool.
+_WRITE_KEYWORD_RE = re.compile(
+    r"\b(CREATE|MERGE|DELETE|SET|DROP|REMOVE)\b",
     re.IGNORECASE,
 )
 
@@ -74,7 +75,7 @@ class GraphDB:
         Raises PermissionError if the query contains any write keyword
         (CREATE, MERGE, DELETE, SET, DROP — whole-word match, case-insensitive).
         """
-        if _WRITE_KEYWORDS.search(query):
+        if _WRITE_KEYWORD_RE.search(query):
             raise PermissionError(
                 "Read-only execute() called with write query. "
                 "Use execute_write() for mutations."

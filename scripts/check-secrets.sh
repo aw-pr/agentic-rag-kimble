@@ -3,8 +3,9 @@
 # patterns that would need cleanup before publishing.
 #
 # Auth route for this repo: Claude Agent SDK OAuth via the Claude Code CLI
-# session. No API key, no op-fetch at runtime. op-refs.sh is the single
-# source of truth for op:// pointers (pointers, not secrets).
+# session. No API key, no op-fetch at runtime. No op:// references should
+# appear anywhere in the tree (the previous op-refs.sh pointer file was
+# removed in pass-29 as vestigial).
 #
 # Run standalone, from smoke-test.sh, or as a pre-commit hook
 # (scripts/install-guards.sh installs it).
@@ -14,10 +15,11 @@ cd "$(dirname "$0")/.."
 fail=0
 flag() { echo "LEAK GUARD: $1" >&2; fail=1; }
 
-# 1. Raw op:// strings may live only in op-refs.sh (and docs/examples).
-if git grep -nE 'op://[^"'"'"'[:space:]]+' -- ':!op-refs.sh' ':!scripts/check-secrets.sh' ':!*.md' ':!*.example' >/dev/null 2>&1; then
-  flag "op:// reference outside op-refs.sh — keep all refs in op-refs.sh"
-  git grep -nE 'op://[^"'"'"'[:space:]]+' -- ':!op-refs.sh' ':!scripts/check-secrets.sh' ':!*.md' ':!*.example' >&2 || true
+# 1. Raw op:// strings must not appear anywhere in the tree (docs/examples
+#    excluded). The op-refs.sh pointer file was removed in pass-29.
+if git grep -nE 'op://[^"'"'"'[:space:]]+' -- ':!scripts/check-secrets.sh' ':!*.md' ':!*.example' >/dev/null 2>&1; then
+  flag "op:// reference found — auth is now OAuth-via-session, no op-fetch pointers needed"
+  git grep -nE 'op://[^"'"'"'[:space:]]+' -- ':!scripts/check-secrets.sh' ':!*.md' ':!*.example' >&2 || true
 fi
 
 # 2. Superseded auth patterns that over-hydrate or are broken.

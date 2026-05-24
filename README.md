@@ -2,17 +2,25 @@
 
 **Agentic RAG with a Kimball-structured property graph over OpenML experimental data.**
 
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-420%20passed-brightgreen)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)  
+![License](https://img.shields.io/badge/license-MIT-green)  
+![Tests](https://img.shields.io/badge/tests-517%20passed-brightgreen)  
+![Status](https://img.shields.io/badge/status-proof%20of%20concept-orange)
+
+---
+
+> **Scope.** Proof of concept and portfolio artefact, not a production system. The retrieval shape is defensible and the eval numbers are honest, but contract drift, boundary-handling gaps, and run-from-clone friction would all need work before this could carry a real workload. The four-way reviewer benchmark (`runs/reviews/`) is explicit about what would have to change at enterprise scale; [Next steps](#next-steps) lists the highest-leverage follow-ups.
 
 ---
 
 ## What it does
 
-- Queries 171,250 OpenML experimental runs using a LadybugDB property graph (Cypher) and native HNSW vector index — single embedded store, no separate vector database
+- Queries 171,250 OpenML experimental runs using a LadybugDB property graph (Cypher) and native HNSW vector index — single embedded store, no separate vector database. 
 - Applies Ralph Kimball's dimensional modelling to the knowledge graph: `Run` is the fact node; `Algorithm`, `Dataset`, `Task`, and a conformed `Date` are dimension nodes with vector-embedded descriptions; `AlgorithmFamily` is a snowflaked outrigger sub-dimension off `Algorithm`
 - Routes each user query to the appropriate retrieval strategy -- structured lookup, semantic similarity, or aggregate analysis -- via a Claude Agent SDK orchestrator (OAuth via Claude Code session; costs charge against Max subscription quota, no API billing)
+
+> **Heads-up on quota.** Each query may chain several tool calls. The default budget is `agent_max_tool_calls = 15` (about 47 SDK turns); a complex question can burn that and still hit the cap. Bump it in `src/config.py` only when you need to — every extra turn is a real call against your Max quota.
+
 - Scores retrieval quality offline via a 20-fixture recall harness; response quality is scored live by a `claude-haiku-4-5` LLM judge sampled at 5 fixtures per run
 
 ---
@@ -40,11 +48,13 @@ flowchart LR
 
 LadybugDB is the community continuation of Kùzu following Apple's acqui-hire in early 2025. All three agent tools -- graph query, semantic search, and aggregate measures -- operate against a single embedded LadybugDB instance. The `VECTOR` extension provides the native HNSW index on dimension-node descriptions; ChromaDB is not used.
 
+> For the design discussion behind these choices — how this scales, how the dimensional model copes with drift, how the project compares with flat RAG and long-context approaches, and where the wider RAG market is heading — see [`docs/discussion.md`](docs/discussion.md).
+
 ---
 
 ## Kimball model
 
-Most RAG systems treat the knowledge base as a flat bag of document chunks, relying entirely on vector similarity to surface relevant content. This project applies dimensional modelling before retrieval: `Run` nodes record what happened (a training experiment, its accuracy, runtime, and configuration); `Algorithm`, `Dataset`, `Task`, and `Date` nodes record stable context about the entities involved. Vector embeddings are stored on the dimension nodes' descriptions via LadybugDB's native HNSW index. This gives the agent a structurally grounded retrieval surface -- aggregate queries operate over measures on fact nodes rather than synthesising text, and hallucination requires fabricating a specific run ID rather than paraphrasing an unverifiable chunk.
+Most RAG systems treat the knowledge base as a flat bag of document chunks, relying entirely on vector similarity to surface relevant content. This project applies dimensional modelling before retrieval: `Run` nodes record what happened (a training experiment, its accuracy, runtime, and configuration); `Algorithm`, `Dataset`, `Task`, and `Date` nodes record stable context about the entities involved. Vector embeddings are stored on the dimension nodes' descriptions via LadybugDB's native HNSW index. This gives the agent a structurally grounded retrieval surface -- aggregate queries operate over measures on fact nodes rather than synthesising text, and to hallucinate the model has to fabricate a specific run ID or invent a flow ID rather than paraphrasing an unverifiable chunk. Structure makes that harder; it does not eliminate it. The eval section below documents cases where the judge caught invented identifiers despite this surface.
 
 The model is deliberately snowflaked rather than pure star. `AlgorithmFamily` is an outrigger sub-dimension hung off `Algorithm` (`(Algorithm)-[:BELONGS_TO_FAMILY]->(AlgorithmFamily)`), nine families with their own description embeddings. That extra hop is exactly what makes "which algorithm *family* works best on imbalanced data" a clean aggregation over a dimension attribute rather than a brittle string match, and it is the kind of trade-off (normalised outrigger vs denormalised star) that flat-table RAG cannot express. `Date` is a conformed date dimension on a `YYYYMMDD` integer key (`(Run)-[:RUN_ON_DATE]->(Date)`), so run volume over time is a dimension join, not date arithmetic on the fact node.
 
@@ -61,21 +71,32 @@ flowchart LR
 
 ## Quick start
 
+### Prerequisites
+
+- **Python 3.11 or newer**.
+- **[Claude Code CLI](https://docs.claude.com/en/docs/claude-code)** installed and signed in. The agent authenticates automatically via the active Claude Code session; there are no API keys, no `.env` files, and no 1Password / `op-fetch` plumbing in the runtime path. If `claude --version` works in your shell, you're set.
+- A few GB of disk for the LadybugDB store and the local embedding model (`BAAI/bge-small-en-v1.5`, ~130 MB).
+
+### Steps
+
 ```bash
-# 1. Install
+# 1. Install Python dependencies
 pip install -r requirements.txt
 
-# 2. Ingest (async, ~90 min for the full 500-dataset corpus)
-python -m src.ingestion.loader_async --max-datasets 500 --max-runs-per-dataset 500
+# 2. Preflight (verifies Python, claude-agent-sdk, LadybugDB, claude CLI, data/)
+./scripts/preflight.sh
 
-# 3. Build the vector index
+# 3. Ingest the corpus (async, ~90 min for the full 500-dataset run on M-series)
+./scripts/ingest.sh
+
+# 4. Build the vector index
 ./scripts/build-index.sh
 
-# 4. Run the demo
+# 5. Run the demo
 streamlit run src/ui/app.py
 ```
 
-For CLI queries (OAuth is handled automatically by the Claude Agent SDK via the Claude Code session):
+For CLI queries:
 
 ```bash
 python -m src.agent.orchestrator --query "Which algorithm families work best on imbalanced tabular data?"
@@ -116,18 +137,18 @@ a gap consistent with the broader OpenML literature on tabular data.
 
 Run against 20 query-to-entity fixtures rebuilt from scratch against the actual 500-dataset / 1588-algorithm corpus (pass 24). Each fixture's expected entities were verified to exist in the live DB before authoring. No broadening after the fact. The pass-28 OpenML free-form description backfill lifted semantic recall as predicted at the pass-27 handoff:
 
-| Metric | pass-27 | pass-28 |
-|---|---|---|
-| recall@5 | 0.850 | **0.900** |
-| recall@10 | 0.900 | **0.950** |
+| Metric    | pass-27 | pass-28   |
+| --------- | ------- | --------- |
+| recall@5  | 0.850   | **0.900** |
+| recall@10 | 0.900   | **0.950** |
 
 Per-tool breakdown (recall@10):
 
-| Tool | pass-27 | pass-28 |
-|---|---|---|
-| aggregate | 1.000 | 1.000 |
-| graph | 1.000 | 1.000 |
-| semantic | 0.750 | **0.875** |
+| Tool      | pass-27 | pass-28   |
+| --------- | ------- | --------- |
+| aggregate | 1.000   | 1.000     |
+| graph     | 1.000   | 1.000     |
+| semantic  | 0.750   | **0.875** |
 
 One semantic failure remains, and it is a known retrieval limit rather than fixture design: `histogram gradient boosting fast bins sklearn` returns `Pipeline` nodes instead of `HistGradientBoostingClassifier`, whose description still lacks histogram-binning vocabulary. Fixable by adding targeted vocabulary to that description in a future pass; left visible rather than papered over.
 
@@ -145,12 +166,12 @@ The pass-20 grounding score was depressed by a harness gap, not agent hallucinat
 
 With an honest judge in place, it began catching real defects -- the agent inflating counts and inventing flow IDs. The pass-28 strict grounding rule in `src/agent/prompts.py` targets exactly that. Sampled means (5 fixtures), before and after the rule:
 
-| Dimension | pass-27 | pass-28 |
-|---|---|---|
-| Grounding | 2.4 | **3.00** |
-| Reasoning | -- | 3.00 |
-| Completeness | -- | 2.80 |
-| Overall | 2.60 | **2.92** |
+| Dimension    | pass-27 | pass-28  |
+| ------------ | ------- | -------- |
+| Grounding    | 2.4     | **3.00** |
+| Reasoning    | --      | 3.00     |
+| Completeness | --      | 2.80     |
+| Overall      | 2.60    | **2.92** |
 
 The grounding rule produced a real lift (2.4 -> 3.00) but did not reach the 3.5+ target set at the pass-27 handoff -- reported as measured, not rounded up. Further grounding work is a live follow-up.
 
@@ -158,13 +179,16 @@ The grounding rule produced a real lift (2.4 -> 3.00) but did not reach the 3.5+
 
 ## Local stack
 
-| Component | Technology | Note |
-|---|---|---|
-| Property graph + vector index | LadybugDB (embedded, MIT) | Cypher + native HNSW; single store |
-| Embeddings | BAAI/bge-small-en-v1.5 | 384-dim, ~130MB, CPU-viable |
-| LLM agent | Claude Agent SDK + Max subscription | OAuth via Claude Code session; no API key |
-| LLM judge | claude-haiku-4-5 via Claude Agent SDK | Same auth path; sampled (5 fixtures) |
-| UI | Streamlit | `streamlit run src/ui/app.py` |
+| Component                     | Technology                            | Note                                      |
+| ----------------------------- | ------------------------------------- | ----------------------------------------- |
+| Property graph + vector index | LadybugDB (embedded, MIT)             | Cypher + native HNSW; single store        |
+| Embeddings                    | BAAI/bge-small-en-v1.5                | 384-dim, ~130MB, CPU-viable               |
+| LLM agent                     | Claude Agent SDK + Max subscription   | OAuth via Claude Code session; no API key |
+| LLM judge                     | claude-haiku-4-5 via Claude Agent SDK | Same auth path; sampled (5 fixtures)      |
+| UI                            | Streamlit                             | `streamlit run src/ui/app.py`             |
+
+**Store portability.** The Kimball schema is the load-bearing decision; LadybugDB is the current implementation. The fact/dimension/snowflake shape transfers to Neo4j, Memgraph, or DuckDB-graph with mechanical Cypher translation (DuckDB-graph would need its property-graph extension or a SQL rewrite). The HNSW vector index would move alongside or split out to pgvector/FAISS. None of this is currently demonstrated, but the schema is not bound to a single vendor.
+
 
 ---
 
@@ -192,6 +216,18 @@ Build provenance: per-pass retrospectives are in `runs/build-log/`.
 **Judge grounding below target.** The grounding rule lifted the sampled grounding score from 2.4 to 3.00 (pass 28), short of the 3.5+ target. Closing that gap is the main open response-quality follow-up.
 
 **Ingestion time.** The full 500-dataset async ingest takes approximately 90 minutes on an M-series MacBook. Use `--max-datasets 50` for a faster smoke corpus during development.
+
+---
+
+## Next steps
+
+Surfaced by the May 2026 four-way independent reviewer benchmark (`runs/reviews/`) and prioritised against the limitations above. Each item is an open thread, not committed scope.
+
+- **Reproduce the eval against a non-OpenML corpus.** OpenML is friendly because it was Kimball-shaped to begin with. A pilot on Jira + GitHub events, or PagerDuty + deploys, would test whether the dimensional retrieval pattern transfers to messy enterprise systems with mutable taxonomies and partial observability. Highest-leverage credibility move per the leader reviewers.
+- **Operational reality section.** On-call story, failure modes when ingest segfaults mid-overnight (FU2 above), per-query latency distribution under concurrent load. The current README is sized for a laptop demo; a 140-engineer adoption needs a duty-rota answer.
+- **Validate the schema migration framework in anger.** The migration index (`docs/MIGRATIONS.md`, `src/graph/migrations/`) ships in pass-29 but no real second migration has yet run. The next time a dimension attribute changes is the trial.
+- **Close the grounding gap to ≥3.5.** Sampled grounding score sits at 3.0; the target is 3.5+. Most likely route is judge-side context expansion plus a prompt-level constraint on tool-result citation density.
+- **Demonstrate routing discipline.** When the agent uses structured tools vs semantic retrieval vs (eventually) long-context fallback, with observed accuracy and latency by question class. Would make the architectural bet legible to a reviewer who runs the harness once.
 
 ---
 

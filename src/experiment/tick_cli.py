@@ -33,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = (
         f"spawned={len(report.spawned)} "
         f"completed={len(report.completed)} "
+        f"committed={len(report.committed)} "
         f"blocked={len(report.blocked)} "
         f"paused={report.paused} "
         f"stopped={report.stopped} "

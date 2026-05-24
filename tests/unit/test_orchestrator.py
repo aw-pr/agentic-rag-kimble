@@ -6,13 +6,16 @@ All Claude Agent SDK calls are mocked — no live API calls.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import AsyncIterator
+from unittest.mock import patch
 
 import pytest
 
 from src.agent.orchestrator import (
     AgentResponse,
+    _run_query_async,
     extract_citations,
     run_query,
 )
@@ -443,3 +446,82 @@ def test_system_prompt_mentions_three_tools():
 
 def test_system_prompt_mentions_max_tool_calls():
     assert "5 tool calls" in SYSTEM_PROMPT
+
+
+# ── ContextVar concurrent-isolation ──────────────────────────────────────────
+
+async def test_concurrent_run_query_tasks_do_not_share_config():
+    """
+    Two concurrent _run_query_async tasks must each see their own Config, not
+    each other's. This is the regression test for the global→ContextVar refactor.
+
+    Strategy: each task's sdk_query mock reads _current_config.get() at the
+    point it executes (inside the async for loop) and stashes the model string.
+    We then assert that task A saw config_a and task B saw config_b.
+    """
+    from src.agent.orchestrator import _current_config
+
+    seen: dict[str, str] = {}
+
+    def _make_capturing_sdk_query(label: str):
+        """Return a sdk_query replacement that records what _current_config holds."""
+        from claude_agent_sdk import ResultMessage
+
+        async def _fake_sdk_query(prompt, options):  # noqa: ARG001
+            # Yield immediately so both tasks are "in flight" at the same time.
+            await asyncio.sleep(0)
+            cfg = _current_config.get()
+            seen[label] = cfg.claude_model if cfg is not None else "NONE"
+            result_msg = ResultMessage(
+                subtype="success",
+                duration_ms=1,
+                duration_api_ms=1,
+                is_error=False,
+                num_turns=1,
+                session_id=label,
+                stop_reason="end_turn",
+                total_cost_usd=0.0,
+                usage={},
+                result=f"answer-{label}",
+                structured_output=None,
+                model_usage=None,
+                permission_denials=None,
+                deferred_tool_use=None,
+                errors=None,
+                api_error_status=None,
+                uuid=None,
+            )
+            yield result_msg
+
+        return _fake_sdk_query
+
+    config_a = Config(claude_model="claude-model-A")
+    config_b = Config(claude_model="claude-model-B")
+
+    # Run both tasks concurrently under a single sdk_query patch that routes by
+    # capturing the ContextVar value inside each task's execution frame.
+    with patch("src.agent.orchestrator.sdk_query", side_effect=[
+        _make_capturing_sdk_query("A")("q-a", None),
+        _make_capturing_sdk_query("B")("q-b", None),
+    ]):
+        # We can't easily use side_effect with async generators via patch; instead
+        # supply each task its own mock directly via a wrapper.
+        pass
+
+    # Simpler: patch sdk_query to a callable that dispatches on call order.
+    call_count = 0
+
+    def _dispatching_sdk_query(prompt, options):  # noqa: ARG001
+        nonlocal call_count
+        label = "A" if call_count == 0 else "B"
+        call_count += 1
+        return _make_capturing_sdk_query(label)(prompt, options)
+
+    with patch("src.agent.orchestrator.sdk_query", side_effect=_dispatching_sdk_query):
+        await asyncio.gather(
+            _run_query_async("query-a", config_a),
+            _run_query_async("query-b", config_b),
+        )
+
+    assert seen["A"] == "claude-model-A", f"Task A saw {seen['A']!r}, expected claude-model-A"
+    assert seen["B"] == "claude-model-B", f"Task B saw {seen['B']!r}, expected claude-model-B"

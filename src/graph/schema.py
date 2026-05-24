@@ -125,33 +125,21 @@ def _col_defs(cols: list[tuple[str, str]], pk: str) -> str:
 
 
 def create_schema(conn) -> None:
-    """Create all node tables, relationship tables, and vector indexes in *conn*."""
-    for table, cols in NODE_TABLES.items():
-        pk = _PRIMARY_KEYS[table]
-        ddl = f"CREATE NODE TABLE IF NOT EXISTS {table} ({_col_defs(cols, pk)})"
-        conn.execute(ddl)
+    """Create all node tables, relationship tables, and vector indexes in *conn*.
 
-    for rel_name, from_table, to_table in REL_TABLES:
-        ddl = (
-            f"CREATE REL TABLE IF NOT EXISTS {rel_name} "
-            f"(FROM {from_table} TO {to_table})"
-        )
-        conn.execute(ddl)
+    Thin backward-compatibility wrapper. The actual DDL now lives in
+    ``src.graph.migrations`` and is driven by an ordered migration runner
+    with version tracking inside the database itself. See
+    ``docs/MIGRATIONS.md`` for the recipe used by new migrations.
 
-    # Check existing indexes once to avoid "already exists" errors.
-    existing_idx_res = conn.execute("CALL SHOW_INDEXES() RETURN table_name, index_name")
-    existing_df = existing_idx_res.get_as_df()
-    existing_indexes: set[tuple[str, str]] = set()
-    if not existing_df.empty:
-        for _, row in existing_df.iterrows():
-            existing_indexes.add((row["table_name"], row["index_name"]))
+    Behaviour is unchanged for callers: this remains idempotent and
+    creates the full Kimball schema on a fresh database.
+    """
+    # Imported here to avoid a circular import: the initial migration
+    # reads NODE_TABLES / REL_TABLES / VECTOR_INDEXES from this module.
+    from src.graph.migrations import run_migrations
 
-    for table, idx_name, col, _dim in VECTOR_INDEXES:
-        if (table, idx_name) in existing_indexes:
-            continue
-        # Dimension is inferred from the FLOAT[N] column type; no 4th arg.
-        ddl = f"CALL CREATE_VECTOR_INDEX('{table}', '{idx_name}', '{col}')"
-        conn.execute(ddl)
+    run_migrations(conn)
 
 
 def drop_schema(conn) -> None:
@@ -172,3 +160,6 @@ def drop_schema(conn) -> None:
         conn.execute(f"DROP TABLE IF EXISTS {rel_name}")
     for table in NODE_TABLES:
         conn.execute(f"DROP TABLE IF EXISTS {table}")
+    # The migration runner's version-tracking table is part of the schema
+    # too; drop it so a subsequent create_schema() replays migration 0001.
+    conn.execute("DROP TABLE IF EXISTS SchemaVersion")

@@ -1,0 +1,23 @@
+# Strict block list — phrases that must never appear anywhere in the working
+# tree, regardless of path. Copy to .publish-guard-strict.local (gitignored)
+# and edit. Scanned by scripts/publish-guard-strict-scan.sh on every commit,
+# push, and smoke-test. Block on hit, no exemptions.
+#
+# ERE regex, one per line. Blank lines and #-comments ignored.
+#
+# This list is the "always-block" tier: phrases that should not appear in
+# private retros, archive prompts, HANDOFF/RUNBOOK, or anywhere else. For
+# path-dependent patterns (machine paths, persona names) use .publish-guard.local
+# which honours an exemption list for private-tier paths.
+
+\bCV\b
+curriculum vitae
+recruiter
+hiring manager
+cover letter
+job.search
+interview prep
+\bIR35\b
+day rate
+interim CTO
+fractional CTO

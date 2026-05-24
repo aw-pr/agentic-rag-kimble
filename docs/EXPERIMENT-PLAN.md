@@ -212,8 +212,8 @@ verbatim.
 ### Phase 8 — Write-up (T1 draft + cross-family critique + T3 polish)
 
 Update `EXPERIMENT.md` with final results. Refresh README to match the
-experimental framing (architectural narrative, not recruiter
-positioning). Build-log entries per phase. Codex critiques the draft.
+experimental framing (architectural narrative, not personal
+positioning copy). Build-log entries per phase. Codex critiques the draft.
 T3 does the mechanical doc rewrites.
 
 ### Phase 9 — Verdict (T0 only)
@@ -239,7 +239,7 @@ Six categories, each with a concrete artefact:
 | 3 | Auth / automation rules ("autumn rules" — assumed auth/auto, flag if mis-read) | Any new credential surface from `codex exec` + `claude -p` running unattended. Hook entries in settings.json for the new commands. Pre-tool guard for the leak-check on scaffold writes. | Diffs to `settings.json` and `auth-route-security` skill if patterns generalised |
 | 4 | Git curation | What worked / didn't in the per-task commit model. Trailer convention adoption rate. Branch hygiene at phase boundaries. Whether the leak guard caught anything live. Tag strategy review. | `docs/GIT-CURATION.md` lessons; possible new skill `phase-commit-curation` |
 | 5 | Scaffolding meta-process | Tick interval (was 5 min right?), parallel cap (was 3 right?), triage rate (too eager / too late?), Codex vs Claude reliability deltas, watchdog tuning, real verifier-disagreement causes. | `runs/build-log/pass-N-scaffold-postmortem.md` |
-| 6 | Experiment outcomes | Did the hypothesis answer hold up under the falsification criterion? Which Phase-1 calls were premature in hindsight? Was the second-domain gesture informative? iTone material? Project memory worth writing for future work? | Project memory files in `~/.claude/projects/.../memory/`, build-log entry, iTone-post outline |
+| 6 | Experiment outcomes | Did the hypothesis answer hold up under the falsification criterion? Which Phase-1 calls were premature in hindsight? Was the second-domain gesture informative? Worth writing up for future work? | Project memory files, build-log entry, write-up outline |
 
 ## F. Heartbeat and stall handling
 

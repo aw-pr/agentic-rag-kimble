@@ -37,5 +37,14 @@ print('Dry run complete.')
   exit 0
 fi
 
+echo "Initialising schema..."
+python3 -c "
+from src.config import get_config
+from src.graph.db import GraphDB
+with GraphDB(get_config()) as db:
+    db.initialise_schema()
+print('Schema initialised.')
+"
+
 echo "Running full ingestion pipeline..."
-python3 -m src.ingestion.loader
+python3 -m src.ingestion.loader_async

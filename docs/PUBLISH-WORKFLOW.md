@@ -9,6 +9,10 @@ Placeholders used below: `PRIV` = your private remote (default `origin`),
 (e.g. `myorg/myrepo`), `PUBLISH_BRANCH` = the local line that becomes public
 (this repo uses `publish`).
 
+**History mode for this repo:** `squash` (default). Each adopting repo declares
+its mode here at adoption — flip to `preserve` only after the readiness test
+below. The mode is stored in `git config publishguard.historymode`.
+
 ## Model
 
 - **One private working repo.** Full, messy history is fine — it never goes
@@ -107,13 +111,48 @@ stay fetchable by SHA, content gets cached/indexed). A guardrail for an
 irreversible outward action must stop it and point at the right command, not
 narrate the mistake as it completes.
 
-## Squashing
+## History mode: squash vs preserve
+
+Two ways to keep the public mirror clean, picked once per repo and recorded at
+the top of this file.
+
+**`squash` (default)** — orphan-squash seed; `git merge --squash wip/x` for
+every merge so the publish line is one-commit-per-topic. Right when the
+private history carries secrets/absolute paths/personal positioning copy that's
+painful to scrub commit-by-commit, or when the pivots aren't part of the story.
+
+**`preserve`** — sanitise the *full* history with `git filter-repo` (paths,
+secrets, personal positioning copy scrubbed across every commit), then push as the seed.
+Ongoing merges use `git merge --no-ff wip/x` so per-agent authors, atomic
+commits, and pivots survive on the public mirror. Right when the repo was
+built with commit discipline (atomic commits, per-agent `--author=`) and the
+pivots *are* the story (portfolio value).
+
+**Preserve-readiness test** — before switching: every commit must pass the
+pre-commit guards, not just the tip. Walk the history:
+
+```bash
+git rev-list publish | while read sha; do
+  git checkout "$sha" -- . && bash scripts/check-secrets.sh || { echo "FAIL at $sha"; break; }
+done
+```
+
+If anything trips, either `git filter-repo` until clean, or stay on `squash`.
+
+**Switching modes mid-life** is incident-grade for `squash → preserve` (you
+have to rebuild the public seed from a sanitised history and force-push, which
+the gate blocks by default). `preserve → squash` is just "from now on, merge
+with `--squash`" — no rewrite needed.
+
+### Squashing rules (both modes)
 
 - Squash *unpublished* commits at will — topic-branch `--squash` merge (best:
   the publish line stays append-only, every push is a clean ff, no force
   anywhere), or `git rebase -i <PUB/main commit>` for a quick local tidy
   (then the private push needs `--force-with-lease`).
-- Never squash/rebase commits already on `PUB/main`.
+- Never squash/rebase commits already on `PUB/main`. The pre-push hook now
+  blocks non-fast-forward pushes to public `main`/`master` even with the
+  sentinel set — override is `--no-verify`, treat that use as an incident.
 
 ## Applying to other repos
 
