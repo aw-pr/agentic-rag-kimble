@@ -72,7 +72,17 @@ def highlight_citations(answer: str) -> str:
     #    alter them — but we check for the pattern on the escaped string anyway.
     def _wrap(m: re.Match) -> str:
         citation = m.group(1)
-        return f'<span style="background:#fff4a3;border-radius:3px;padding:0 2px">{citation}</span>'
+        # Inherit the theme's text colour and add a semi-transparent amber
+        # accent (bg + border) so the pill stays legible in light AND dark
+        # Streamlit themes. The previous solid pale-yellow fill clashed with
+        # light text in dark mode.
+        return (
+            '<span style="background:rgba(251,191,36,0.18);'
+            'color:inherit;'
+            'border:1px solid rgba(251,191,36,0.55);'
+            'border-radius:4px;padding:1px 6px;'
+            f'font-weight:500;white-space:nowrap">{citation}</span>'
+        )
 
     return _CITATION_RE.sub(_wrap, escaped)
 
@@ -265,7 +275,7 @@ def _render_sidebar() -> str:
 
         st.divider()
         st.caption(
-            "Run via `./run-secure-query.sh` to inject credentials via 1Password."
+            "Auth is automatic via your Claude Code OAuth session (no 1Password injection)."
         )
     return page
 
@@ -1056,7 +1066,11 @@ def main() -> None:
             err_msg = str(exc)
             st.error(f"Authentication failed — {err_msg}")
             with st.expander("How to fix"):
-                st.code("./run-secure-query.sh streamlit run src/ui/app.py", language="bash")
+                st.markdown(
+                    "Claude Agent SDK auth uses your Claude Code OAuth session. "
+                    "Sign in to Claude Code, then re-run the app:"
+                )
+                st.code("streamlit run src/ui/app.py", language="bash")
             st.session_state.last_response = None
             st.session_state.last_elapsed = None
 

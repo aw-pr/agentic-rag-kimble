@@ -32,6 +32,12 @@ fi
 git config --get publishguard.sentinel >/dev/null 2>&1 \
   || git config publishguard.sentinel PUBLISH_GUARD_OK
 
+# History mode: `squash` (default — orphan-squash seed, --squash merges) or
+# `preserve` (filter-repo seed, --no-ff merges, per-commit cleanliness required).
+# See docs/PUBLISH-WORKFLOW.md "History mode" for the trade-off.
+git config --get publishguard.historymode >/dev/null 2>&1 \
+  || git config publishguard.historymode squash
+
 pub_match="$(git config --get publishguard.publicmatch || true)"
 pub_remote="$(git config --get publishguard.publicremote || true)"
 priv_remote="$(git config --default origin --get publishguard.privateremote)"
@@ -56,5 +62,8 @@ else
     echo "install-guards: 'git publish' alias already current — left untouched"
   fi
 fi
+
+history_mode="$(git config --get publishguard.historymode)"
+echo "install-guards: history mode = ${history_mode} (flip with: git config publishguard.historymode <squash|preserve>)"
 
 echo "install-guards: done."

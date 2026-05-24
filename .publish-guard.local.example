@@ -17,8 +17,21 @@
 # match themselves and trip the gate):
 # ^## CV bullet
 # ^## CV section
+# ^## Recruiter
+# ^## Outreach
 # <distinctive-recruiter-keyword>
 # <distinctive-rate-phrase>
+# <linkedin-profile-url>
+#
+# Persona / brand / publication markers — anything that signals personal
+# positioning rather than a project artefact. Catch your Substack handle,
+# personal brand words, custom skill names that name you, etc. The pattern
+# scan exempts a small allowlist of paths (LICENSE for legitimate copyright;
+# HANDOFF.md / RUNBOOK.md / runs/** / archive/** for never-publish files);
+# everywhere else, these patterns will trip the gate.
+# <substack-handle>
+# <personal-brand-word>
+# <persona-skill-name>
 #
 # ---------------------------------------------------------------------------
 # Publish gate (separate mechanism — configured via `git config`, NOT here):

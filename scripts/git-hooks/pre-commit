@@ -9,9 +9,17 @@ repo_root="$(git rev-parse --show-toplevel)"
 staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 [ -z "$staged" ] && exit 0
 
+# 1. Strict scanner — runs against the working tree (tracked + untracked,
+#    gitignore-aware), exempting only private-tier paths. Catches personal
+#    positioning phrases before they can slip through a `git add -A`.
+#    Pattern list: .publish-guard-strict.local.
+if [ -x "$repo_root/scripts/publish-guard-strict-scan.sh" ]; then
+  "$repo_root/scripts/publish-guard-strict-scan.sh"
+fi
+
 fail=0
 
-# 1. Never-commit files (regardless of .gitignore state).
+# 2. Never-commit files (regardless of .gitignore state).
 while IFS= read -r f; do
   case "$f" in
     .env|.env.*|*.local|op-refs.local.sh|*settings.local.json|state.json|jobs|*/auth.json|*.log)
@@ -21,13 +29,25 @@ while IFS= read -r f; do
   esac
 done <<< "$staged"
 
-# 2. Personal-pattern scan of staged content.
+# 3. Personal-pattern scan of staged content.
+# Exempt paths (private-only by design; excluded from publish squash per
+# docs/PUBLISH-WORKFLOW.md + HANDOFF.md):
+#   runs/**              scaffold audit trail + build-log retrospectives
+#   archive/**           historical agent prompts with personal paths
+#   HANDOFF.md           private session-handoff notes
+#   RUNBOOK.md           private operator playbook
+#   LICENSE              legitimate copyright attribution
+# The never-commit list above and the leak guard (step 3) still apply.
 local_cfg="$repo_root/.publish-guard.local"
 if [ -f "$local_cfg" ]; then
   patterns="$(grep -vE '^\s*(#|$)' "$local_cfg" || true)"
   if [ -n "$patterns" ]; then
     while IFS= read -r f; do
       [ -f "$repo_root/$f" ] || continue
+      case "$f" in
+        runs/*|archive/*|HANDOFF.md|RUNBOOK.md|LICENSE) continue ;;
+        .publish-guard.local.example|.publish-guard-strict.local.example) continue ;;
+      esac
       while IFS= read -r pat; do
         [ -z "$pat" ] && continue
         if git show ":$f" 2>/dev/null | grep -nE -- "$pat" >/dev/null 2>&1; then
@@ -44,9 +64,10 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-# 3. Repo-specific extension: chain the auth/secrets leak guard. The two
-#    concerns (personal/CV copy above; auth/op-fetch leaks below) are
-#    enforced through this one hook so neither side can regress on commit.
+# 4. Repo-specific extension: chain the auth/secrets leak guard. The three
+#    concerns (strict phrases first; path-aware personal patterns above; auth
+#    leaks below) are enforced through this one hook so none can regress on
+#    commit.
 if [ -x "$repo_root/scripts/check-secrets.sh" ]; then
   "$repo_root/scripts/check-secrets.sh"
 fi

@@ -24,6 +24,8 @@ from src.experiment.state import (
     mark_failed,
     mark_running,
     mark_stalled,
+    mark_verifier_failed,
+    mark_verifying,
     retry_or_block,
     save,
 )
@@ -55,6 +57,19 @@ def test_save_then_load_preserves_task(tmp_path: Path) -> None:
     assert reloaded.state == TaskState.RUNNING
     assert reloaded.pid == 123
     assert reloaded.attempts == 1
+
+
+def test_save_load_preserves_last_verifier_evidence(tmp_path: Path) -> None:
+    """Pass-29 bug Y: feedback-on-retry needs the evidence to survive a
+    state.yaml round-trip so a tick after a crash still surfaces it."""
+    path = tmp_path / "state.yaml"
+    t = _task(state=TaskState.QUEUED, attempts=1)
+    t.last_verifier_evidence = "scipy parity test hardcoded constants"
+    save([t], path)
+    [reloaded] = load(path)
+    assert reloaded.last_verifier_evidence == (
+        "scipy parity test hardcoded constants"
+    )
 
 
 def test_load_missing_file_returns_empty(tmp_path: Path) -> None:
@@ -108,7 +123,13 @@ def test_mark_stalled_from_running() -> None:
     assert t.state == TaskState.STALLED
 
 
-def test_mark_stalled_rejects_non_running() -> None:
+def test_mark_stalled_from_verifying() -> None:
+    """Plan section C: verifying -> stalled when verifier pid dead or log old."""
+    t = mark_stalled(_task(state=TaskState.VERIFYING, pid=77))
+    assert t.state == TaskState.STALLED
+
+
+def test_mark_stalled_rejects_non_running_or_verifying() -> None:
     """Refusing this transition from `queued` or `done` is how we
     catch a tick logic bug early."""
     with pytest.raises(ValueError):
@@ -183,8 +204,13 @@ def test_mark_running_rejects_non_queued() -> None:
 
 
 def test_mark_done_from_running() -> None:
-    """Worker wrote result.json and verifier returned PASS."""
+    """Legacy / test-only path: accept RUNNING for backward compat."""
     assert mark_done(_task(state=TaskState.RUNNING)).state == TaskState.DONE
+
+
+def test_mark_done_from_verifying() -> None:
+    """Normal production path: verifier confirmed PASS -> done."""
+    assert mark_done(_task(state=TaskState.VERIFYING)).state == TaskState.DONE
 
 
 def test_mark_done_from_stalled_allowed() -> None:
@@ -197,6 +223,64 @@ def test_mark_done_rejects_terminal() -> None:
     """Cannot re-complete a done task."""
     with pytest.raises(ValueError):
         mark_done(_task(state=TaskState.DONE))
+
+
+# ---- mark_verifying --------------------------------------------------------
+
+
+def test_mark_verifying_transitions_from_running() -> None:
+    """Running -> verifying: verifier pid + times recorded; worker pid
+    reused for the verifier process (one subprocess active at a time)."""
+    t = mark_verifying(_task(state=TaskState.RUNNING, pid=99), pid=200, started_at=50.0)
+    assert t.state == TaskState.VERIFYING
+    assert t.pid == 200
+    assert t.started_at == 50.0
+    assert t.last_heartbeat == 50.0
+
+
+def test_mark_verifying_rejects_non_running() -> None:
+    """Only a running task can enter verifying; guard catches logic bugs."""
+    with pytest.raises(ValueError):
+        mark_verifying(_task(state=TaskState.QUEUED), pid=1, started_at=0.0)
+
+
+# ---- mark_verifier_failed --------------------------------------------------
+
+
+def test_verifier_failed_retries_when_under_budget() -> None:
+    """Verifier returns FAIL and attempts < max_attempts: back to queued,
+    runtime fields cleared so the worker restarts clean next tick."""
+    t = mark_verifier_failed(
+        _task(
+            state=TaskState.VERIFYING,
+            attempts=0,
+            max_attempts=2,
+            pid=200,
+            started_at=50.0,
+            last_heartbeat=50.0,
+        )
+    )
+    assert t.state == TaskState.QUEUED
+    assert t.attempts == 1
+    assert t.pid is None
+    assert t.started_at is None
+    assert t.last_heartbeat is None
+
+
+def test_verifier_failed_blocks_when_budget_exhausted() -> None:
+    """Second verifier rejection -> blocked with specific reason so
+    triage can distinguish from a worker stall."""
+    t = mark_verifier_failed(
+        _task(state=TaskState.VERIFYING, attempts=1, max_attempts=2)
+    )
+    assert t.state == TaskState.BLOCKED
+    assert t.blocked_reason == "verifier-rejected-twice"
+
+
+def test_verifier_failed_rejects_wrong_state() -> None:
+    """Guard: only verifying tasks can fail verification."""
+    with pytest.raises(ValueError):
+        mark_verifier_failed(_task(state=TaskState.RUNNING))
 
 
 def test_mark_failed_records_reason() -> None:
@@ -222,6 +306,7 @@ def test_is_terminal_for_each_state() -> None:
     expected = {
         TaskState.QUEUED: False,
         TaskState.RUNNING: False,
+        TaskState.VERIFYING: False,
         TaskState.STALLED: False,
         TaskState.BLOCKED: False,
         TaskState.DONE: True,

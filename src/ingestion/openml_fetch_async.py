@@ -25,7 +25,17 @@ from src.ingestion.openml_fetch import FetchedDataset, FetchedRun
 logger = logging.getLogger(__name__)
 
 _OPENML_BASE = "https://www.openml.org/api/v1/xml"
+_OPENML_JSON_BASE = "https://www.openml.org/api/v1/json"
 _NS = "http://openml.org/openml"
+
+# OpenML evaluation function names we pull for each Run. The transform layer
+# (transform.py:395-417) looks for these keys when building the Run fact node.
+_RUN_MEASURE_FUNCTIONS: tuple[str, ...] = (
+    "predictive_accuracy",
+    "f_measure",
+    "area_under_roc_curve",
+    "usercpu_time_millis_training",
+)
 
 # Estimation procedure IDs that return HTTP 412 (private/auth-required tasks).
 # Pre-filtering these at task-list parse time saves one round-trip per skipped task.
@@ -95,6 +105,72 @@ async def _get(client: httpx.AsyncClient, url: str) -> Optional[ET.Element]:
         except Exception as exc:
             logger.warning("Failed to fetch %s: %s", url, exc)
             return None
+
+
+async def _get_json(client: httpx.AsyncClient, url: str) -> Optional[dict]:
+    """Fetch a JSON URL with the semaphore. Returns the parsed dict or None."""
+    sem = _get_semaphore()
+    async with sem:
+        try:
+            response = await client.get(url, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.debug("404 for %s", url)
+            else:
+                logger.warning("HTTP error for %s: %s", url, exc)
+            return None
+        except Exception as exc:
+            logger.warning("Failed to fetch %s: %s", url, exc)
+            return None
+
+
+async def _fetch_evaluations_for_task(
+    client: httpx.AsyncClient, task_id: int
+) -> dict[int, dict[str, float]]:
+    """Bulk-fetch the four Run measures for a single task.
+
+    Returns ``{run_id: {function_name: float_value}}`` covering every run in
+    the task. Issues one JSON call per measure function (four total per task,
+    each returning up to 10,000 evaluation rows). This replaces the missing
+    per-run `/run/{id}` calls that the XML run-list endpoint cannot deliver.
+    """
+    page_size = 10000
+
+    async def _fetch_one(fn: str) -> tuple[str, list[dict]]:
+        """Paginate until the API returns a short page (or empty)."""
+        rows_out: list[dict] = []
+        offset = 0
+        while True:
+            url = (
+                f"{_OPENML_JSON_BASE}/evaluation/list/function/{fn}"
+                f"/task/{task_id}/limit/{page_size}/offset/{offset}"
+            )
+            payload = await _get_json(client, url)
+            if not payload:
+                break
+            rows = (payload.get("evaluations") or {}).get("evaluation") or []
+            if not rows:
+                break
+            rows_out.extend(rows)
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return fn, rows_out
+
+    pairs = await asyncio.gather(*[_fetch_one(fn) for fn in _RUN_MEASURE_FUNCTIONS])
+
+    results: dict[int, dict[str, float]] = {}
+    for fn, rows in pairs:
+        for row in rows:
+            try:
+                rid = int(row["run_id"])
+                val = float(row["value"])
+            except (KeyError, ValueError, TypeError):
+                continue
+            results.setdefault(rid, {})[fn] = val
+    return results
 
 
 # ── Description helpers ───────────────────────────────────────────────────────
@@ -273,8 +349,7 @@ async def _fetch_runs_for_task(
             if run_id == 0 or flow_id == 0:
                 continue
 
-            # Evaluations are not in the run-list endpoint; set empty dict.
-            # (Same as sync loader — most metric values come through separately.)
+            # Evaluations come from a separate bulk JSON endpoint, merged below.
             runs.append(
                 FetchedRun(
                     run_id=run_id,
@@ -287,6 +362,15 @@ async def _fetch_runs_for_task(
             )
         except Exception as exc:
             logger.debug("Skipping run element for task %d: %s", task_id, exc)
+
+    # Hydrate measures from the bulk evaluation endpoint. One call per
+    # measure function returns up to 10k rows for the whole task at once —
+    # cheaper than 171k per-run `/run/{id}` calls.
+    if runs:
+        eval_map = await _fetch_evaluations_for_task(client, task_id)
+        for r in runs:
+            r.evaluations = eval_map.get(r.run_id, {})
+
     return runs
 
 

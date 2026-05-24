@@ -18,13 +18,21 @@ Full architecture: `docs/architecture.md`. Full spec: `docs/spec.md`.
 ## Secrets and auth
 
 - Claude auth route: Claude Agent SDK OAuth (Max subscription quota, no API billing). Auth is automatic via the Claude Code CLI session — no env vars, no API key, no op-fetch required.
-- `run-secure-query.sh` — vestigial thin alias; now just calls `python3 -m src.agent.orchestrator "$@"`. The old op-fetch injection is no longer used.
-- `op-refs.sh` — retained for historical reference; no load-bearing role in current auth path.
-- No `.env` files. No hardcoded keys anywhere.
-- **Two guards, one hook**: `scripts/git-hooks/pre-commit` (armed by `scripts/install-guards.sh`) enforces, in order:
-  1. The publish guard — never-commit files (`.env`, `*.local`, etc.) plus a personal/CV pattern scan reading the gitignored `.publish-guard.local`.
-  2. The leak guard — `scripts/check-secrets.sh`, chained at the end (auth/op-fetch leak patterns).
-- `scripts/check-secrets.sh` also runs as the first step of `scripts/smoke-test.sh`, so the leak side is enforced even without the git hook (which is not cloned).
+- No `.env` files. No hardcoded keys anywhere. The previous `run-secure-query.sh` thin alias and `op-refs.sh` 1Password pointer file were removed in pass-29 as vestigial; the orchestrator is invoked directly via `python -m src.agent.orchestrator`.
+- **Three guards, two hooks**: `scripts/git-hooks/pre-commit` (armed by `scripts/install-guards.sh`) enforces, in order:
+  1. The strict scanner — `scripts/publish-guard-strict-scan.sh`, scans the entire working tree (tracked + untracked, gitignore-aware) against the strict pattern list (`.publish-guard-strict.local`). No path exemptions. Block on hit.
+  2. The publish guard — never-commit files (`.env`, `*.local`, etc.) plus a path-aware personal-pattern scan reading the gitignored `.publish-guard.local`. Exempts `runs/`, `archive/`, `HANDOFF.md`, `RUNBOOK.md`, `LICENSE` (private-tier, excluded from publish squash).
+  3. The leak guard — `scripts/check-secrets.sh`, chained at the end (auth/op-fetch leak patterns).
+- `scripts/git-hooks/pre-push` also runs the strict scanner before allowing a push to the public remote.
+- `scripts/check-secrets.sh` and `scripts/publish-guard-strict-scan.sh` both run as steps of `scripts/smoke-test.sh`, so leak/strict protection is enforced even without the git hooks (which are not cloned).
+
+### Forbidden phrases (block-on-sight)
+
+Never write personal positioning copy anywhere in this repo — comments, docstrings, prompts, prose, anywhere. This applies to Claude and Codex equally.
+
+The authoritative list is in `.publish-guard-strict.local.example` (tracked, see file). It covers categories like personal-status taxonomy, application-process language, and rate-card terms. The strict scanner blocks commits and pushes if any pattern appears in a publishable path. If you need to refer to the *category* in prose, say "personal positioning copy" or "personal-pattern scan".
+
+Private-tier paths (`runs/`, `archive/`, `HANDOFF.md`, `RUNBOOK.md`, `LICENSE`) are exempt because they never reach the public mirror — the publish workflow squash drops them.
 - **Publish workflow** is set up but inert: see `docs/PUBLISH-WORKFLOW.md`. Five `publishguard.*` git-config keys are set (intended public org configured locally; no org or repo name is written into the tracked tree, per the skill's discipline); no public remote is added yet. Publishing only happens via `git publish` (which routes through the fail-closed `pre-push`).
 
 ## Kimball schema
@@ -73,7 +81,7 @@ Check `git log --oneline` to see which passes have completed before resuming.
 ## Key rules
 
 - `data/kuzu_db/` is gitignored (large, recreatable)
-- `op://` references only in `op-refs.sh`
+- No `op://` references anywhere in the tree (the old `op-refs.sh` was removed in pass-29)
 - Cypher write operations (CREATE/MERGE/DELETE/SET) must be blocked in `graph_tool.py`
 - All agent tool functions must have unit tests in `tests/unit/`
 - `runs/` directory (eval outputs) is tracked

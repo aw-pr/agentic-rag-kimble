@@ -15,6 +15,7 @@ build/
 .env*
 *.local
 .publish-guard.local
+.publish-guard-strict.local
 .DS_Store
 .venv/
 venv/
@@ -28,5 +29,9 @@ runs/ingest-*.log
 runs/**/*.log
 runs/**/export/
 data/*.bak.*
+data/*.bak
+nvim.log
+.claude-research-orchestration.md
 !runs/.gitkeep
 !runs/build-log/
+!runs/cost-log.jsonl

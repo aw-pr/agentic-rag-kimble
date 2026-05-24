@@ -70,7 +70,10 @@ def shell_spawn(
     if not script.exists():
         raise FileNotFoundError(f"spawner script missing: {script}")
 
-    cmd = [str(script), task.id, str(workdir)]
+    # state.yaml worker_pref / verifier_pref are authoritative; pass them
+    # as $3 so the shell script never falls back to the brief frontmatter.
+    model = task.worker_pref if kind == "worker" else task.verifier_pref
+    cmd = [str(script), task.id, str(workdir), model]
     # Detach so the tick returns immediately. The worker writes to its
     # own log; the tick polls log mtime + pid liveness next cycle.
     with log_path.open("ab") as logf:
@@ -90,7 +93,8 @@ def planned_command(*, task: Task, kind: str, exp_dir: Path) -> str:
     workdir = task_workdir(exp_dir, task)
     repo_root = exp_dir.parent.parent
     script = repo_root / "scripts" / f"experiment-spawn-{kind}.sh"
-    return shlex.join([str(script), task.id, str(workdir)])
+    model = task.worker_pref if kind == "worker" else task.verifier_pref
+    return shlex.join([str(script), task.id, str(workdir), model])
 
 
 # Default spawner the tick uses unless a test injects something else.

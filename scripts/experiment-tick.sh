@@ -17,6 +17,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Cron's `bash -lc` doesn't see the interactive shell's PATH on macOS, so
+# the script falls back to /usr/bin/python3 (Xcode's 3.9, no pyyaml). Put
+# Homebrew first so we get python3 with the project's deps installed.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 EXP_DIR="runs/experiment"
 STATE="$EXP_DIR/state.yaml"
 BUDGET="$EXP_DIR/budget.yaml"

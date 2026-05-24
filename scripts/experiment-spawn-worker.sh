@@ -18,13 +18,14 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Args
 # ---------------------------------------------------------------------------
-if [ $# -ne 2 ]; then
-  echo "usage: experiment-spawn-worker.sh <task_id> <workdir>" >&2
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+  echo "usage: experiment-spawn-worker.sh <task_id> <workdir> [model]" >&2
   exit 1
 fi
 
 TASK_ID="$1"
 WORKDIR="$2"
+CLI_MODEL="${3:-}"
 BRIEF="$WORKDIR/brief.md"
 RESULT="$WORKDIR/result.json"
 
@@ -55,8 +56,20 @@ parse_model() {
   ' "$BRIEF"
 }
 
-MODEL_RAW="$(parse_model)"
-MODEL="${MODEL_RAW:-$DEFAULT_MODEL}"
+# $3 (CLI_MODEL) from state.yaml is authoritative; frontmatter and default are fallbacks.
+if [ -n "$CLI_MODEL" ]; then
+  MODEL="$CLI_MODEL"
+  MODEL_SOURCE="cli"
+else
+  MODEL_RAW="$(parse_model)"
+  if [ -n "$MODEL_RAW" ]; then
+    MODEL="$MODEL_RAW"
+    MODEL_SOURCE="frontmatter"
+  else
+    MODEL="$DEFAULT_MODEL"
+    MODEL_SOURCE="default"
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # Build the prompt
@@ -66,6 +79,18 @@ BRIEF_BODY="$(awk '
   in_fm && /^---[[:space:]]*$/ { in_fm=0; next }
   !in_fm { print }
 ' "$BRIEF")"
+
+# Feedback prepend: if the tick wrote feedback.md (verifier rejection
+# from a previous round, pass-29 bug Y), surface it at the very top of
+# the prompt so the worker addresses the rejection before re-reading
+# the brief.
+FEEDBACK_PATH="$WORKDIR/feedback.md"
+FEEDBACK_BODY=""
+if [ -f "$FEEDBACK_PATH" ]; then
+  FEEDBACK_BODY="$(cat "$FEEDBACK_PATH")
+---
+"
+fi
 
 RESULT_INSTRUCTION="
 ---
@@ -84,19 +109,25 @@ Do not write the file until you have verified each criterion.
 Task ID: $TASK_ID
 "
 
-PROMPT="${BRIEF_BODY}${RESULT_INSTRUCTION}"
+PROMPT="${FEEDBACK_BODY}${BRIEF_BODY}${RESULT_INSTRUCTION}"
 
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
-echo "experiment-spawn-worker: task=$TASK_ID model=$MODEL"
+echo "experiment-spawn-worker: task=$TASK_ID model=$MODEL (source=$MODEL_SOURCE)"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "$MODEL" in
   sonnet)
-    claude -p --model sonnet --output-format text "$PROMPT"
+    # claude-p-locked.sh serialises parallel claude -p invocations on
+    # this machine to avoid the OAuth token race (pass-29 bug Z).
+    "$SCRIPT_DIR/claude-p-locked.sh" --model sonnet --output-format text "$PROMPT"
     ;;
   gpt-5.5)
-    codex exec --model gpt-5.5 "$PROMPT"
+    # --sandbox workspace-write: codex defaults to read-only, which blocks
+    # any worker output to the workdir (result.json, brief deliverables).
+    # workspace-write scopes writes to the current working directory only.
+    codex exec --model gpt-5.5 --sandbox workspace-write "$PROMPT"
     ;;
   *)
     echo "experiment-spawn-worker: ERROR — unknown model '$MODEL' (supported: sonnet, gpt-5.5)" >&2

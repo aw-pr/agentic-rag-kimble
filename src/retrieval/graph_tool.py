@@ -7,27 +7,20 @@ against the LadybugDB graph database.
 
 from __future__ import annotations
 
-import re
-
 from src.config import Config
-from src.graph.db import GraphDB
-
-# Whole-word regex so "dataset.name STARTS WITH 'set'" does not trip.
-_WRITE_PATTERN = re.compile(
-    r"\b(CREATE|MERGE|DELETE|SET|DROP|REMOVE)\b",
-    re.IGNORECASE,
-)
+from src.graph.db import GraphDB, _WRITE_KEYWORD_RE
 
 
 def validate_cypher(query: str) -> None:
     """Raise PermissionError if query contains write operations.
 
-    Uses whole-word matching so property values containing write keywords
-    (e.g. 'dataset') do not cause false positives.
+    Uses the canonical whole-word regex from src.graph.db so both call sites
+    stay in sync. Whole-word matching avoids false positives on identifiers
+    like "dataset" or "created_at".
     """
-    if _WRITE_PATTERN.search(query):
-        match = _WRITE_PATTERN.search(query)
-        kw = match.group(1).upper() if match else "write"
+    match = _WRITE_KEYWORD_RE.search(query)
+    if match:
+        kw = match.group(1).upper()
         raise PermissionError(
             f"Write operation '{kw}' not permitted in graph_query tool"
         )

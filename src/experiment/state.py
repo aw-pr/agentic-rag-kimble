@@ -26,6 +26,8 @@ import yaml
 class TaskState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
+    # Worker passed acceptance; awaiting independent verifier confirmation.
+    VERIFYING = "verifying"
     STALLED = "stalled"
     BLOCKED = "blocked"
     DONE = "done"
@@ -58,6 +60,12 @@ class Task:
     last_heartbeat: float | None = None
     result_path: str | None = None
     blocked_reason: str | None = None
+    # Verifier's evidence from the most recent rejection, stashed so the
+    # next worker round can address it (pass-29 bug Y — feedback on retry).
+    # The tick also writes the same string to $workdir/feedback.md, which
+    # the worker wrapper prepends to the brief. None when no rejection
+    # has happened yet.
+    last_verifier_evidence: str | None = None
 
 
 def load(path: Path) -> list[Task]:
@@ -98,10 +106,11 @@ def deps_met(task: Task, tasks: list[Task]) -> bool:
 
 
 def mark_stalled(task: Task) -> Task:
-    """A running task whose pid died or whose log mtime exceeds the stall
-    window. Caller (the tick) decides which signal triggered this."""
-    if task.state != TaskState.RUNNING:
-        raise ValueError(f"task {task.id} not running (state={task.state.value})")
+    """A running or verifying task whose pid died or whose log mtime
+    exceeds the stall window. Caller (the tick) decides which signal
+    triggered this."""
+    if task.state not in {TaskState.RUNNING, TaskState.VERIFYING}:
+        raise ValueError(f"task {task.id} not running/verifying (state={task.state.value})")
     task.state = TaskState.STALLED
     return task
 
@@ -135,12 +144,44 @@ def mark_running(task: Task, pid: int, started_at: float) -> Task:
     return task
 
 
+def mark_verifying(task: Task, pid: int, started_at: float) -> Task:
+    """Worker passed acceptance; tick spawns a cross-family verifier.
+    pid/started_at are reused for the verifier process — only one
+    subprocess is active at a time so no extra fields are needed."""
+    if task.state != TaskState.RUNNING:
+        raise ValueError(f"task {task.id} not running (state={task.state.value})")
+    task.state = TaskState.VERIFYING
+    task.pid = pid
+    task.started_at = started_at
+    task.last_heartbeat = started_at
+    return task
+
+
 def mark_done(task: Task) -> Task:
-    """Worker wrote result.json and acceptance criteria passed and
-    verifier returned PASS. Terminal."""
-    if task.state not in {TaskState.RUNNING, TaskState.STALLED}:
+    """Verifier independently confirmed PASS. Terminal.
+    Accepts VERIFYING (normal path) or legacy RUNNING/STALLED."""
+    if task.state not in {TaskState.RUNNING, TaskState.STALLED, TaskState.VERIFYING}:
         raise ValueError(f"task {task.id} cannot complete from {task.state.value}")
     task.state = TaskState.DONE
+    return task
+
+
+def mark_verifier_failed(task: Task) -> Task:
+    """Verifier returned FAIL. Increment attempts; if budget remains,
+    send the worker back to queued for a fresh attempt. If exhausted,
+    block with a specific reason so triage can distinguish this from a
+    worker stall."""
+    if task.state != TaskState.VERIFYING:
+        raise ValueError(f"task {task.id} not verifying (state={task.state.value})")
+    task.attempts += 1
+    task.pid = None
+    task.started_at = None
+    task.last_heartbeat = None
+    if task.attempts < task.max_attempts:
+        task.state = TaskState.QUEUED
+    else:
+        task.state = TaskState.BLOCKED
+        task.blocked_reason = "verifier-rejected-twice"
     return task
 
 

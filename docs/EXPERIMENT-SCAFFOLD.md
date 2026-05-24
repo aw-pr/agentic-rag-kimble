@@ -42,7 +42,7 @@ If you close the Mayor, the cron keeps ticking. If you remove the cron, the Mayo
 | `runs/experiment/budget.yaml` | Pacing knobs (parallel cap, stall window, daily spawn threshold). Edits take effect on next tick. |
 | `runs/experiment/budget.yaml.example` | Committed default; copy to `budget.yaml` to override. |
 | `runs/experiment/events.log` | One-line tick markers + per-transition log. Append-only. |
-| `runs/experiment/tasks/<id>/` | Per-task workdir: `brief.md` (input), `log` (worker output), `result.json` (acceptance), `diff.patch` (proposed changes). |
+| `runs/experiment/tasks/<id>/` | Per-task workdir: `brief.md` (input), `log` (worker/verifier output), `result.worker.json` (worker verdict, preserved on worker-pass), `result.json` (final verifier verdict on `done` tasks), `diff.patch` (proposed changes). |
 | `runs/experiment/PAUSE` | Sentinel: tick stops spawning; in-flight workers finish. |
 | `runs/experiment/STOP` | Sentinel: tick stops spawning *and* SIGTERMs running workers. |
 | `runs/experiment/cron.log` | stdout/stderr of the cron-invoked tick. Useful when the heartbeat itself is misbehaving. |
@@ -52,11 +52,12 @@ If you close the Mayor, the cron keeps ticking. If you remove the cron, the Mayo
 | State | Meaning | Next states |
 |---|---|---|
 | `queued` | Eligible; waiting for capacity or for deps to finish. | `running` |
-| `running` | Spawned. pid + start time recorded. | `done`, `failed`, `stalled` |
-| `stalled` | Either the pid is gone or the log has not been touched within the stall window. | `queued` (retry budget left) or `blocked` |
-| `blocked` | Out of retries, or verifier rejected twice. Needs triage. | `queued` (re-spec) or `failed` (abort), set by an explicit triage task. |
-| `done` | result.json present, acceptance=pass, verifier returned PASS. Terminal. | — |
-| `failed` | Triage aborted, or hard error in tick. Terminal. | — |
+| `running` | Worker spawned. pid + start time recorded. | `verifying`, `failed`, `stalled` |
+| `verifying` | Worker passed acceptance; cross-family verifier spawned to independently confirm. Worker's result preserved at `result.worker.json`; verifier writes `result.json`. | `done`, `queued` (verifier rejected, retry budget left), `blocked` (verifier rejected twice), `stalled` |
+| `stalled` | The pid is gone or the log has not been touched within the stall window. Applies to both worker and verifier rounds. | `queued` (retry budget left) or `blocked` |
+| `blocked` | Out of retries, or verifier rejected twice (`blocked_reason: verifier-rejected-twice`). Needs triage. | `queued` (re-spec) or `failed` (abort), set by an explicit triage task. |
+| `done` | Verifier independently returned PASS. Terminal. | — |
+| `failed` | Triage aborted, or hard error in tick (e.g. verifier-spawn-error). Terminal. | — |
 
 A task that stalls and retries within a single tick **does not respawn that
 tick** — natural one-heartbeat cooldown. This prevents a chronically broken
@@ -66,9 +67,10 @@ task from chewing through its attempts in seconds.
 
 1. Author a task brief in `runs/experiment/tasks/<id>/brief.md`. Frontmatter optional (`model: sonnet` or `model: gpt-5.5` to override the default).
 2. Append a task entry to `runs/experiment/state.yaml` (see section C of the plan for the schema). State `queued`. `worker_pref` defaults to `sonnet`; `verifier_pref` to `gpt-5.5` (the cross-family inverse).
-3. Within five minutes the tick spawns it. The Mayor shows it move to `running`.
-4. When the worker exits, `result.json` appears. Next tick promotes the task to `done` (or back to `stalled` if acceptance failed).
-5. The tick commits the worker's `diff.patch` on success, with per-agent author attribution.
+3. Within five minutes the tick spawns the worker. The Mayor shows it move to `running`.
+4. When the worker exits with `acceptance: pass`, the tick preserves the worker verdict as `result.worker.json` and spawns the cross-family verifier; the Mayor shows the task move to `verifying`. If the worker reports `acceptance: fail`, the task goes to `stalled` and retry/block logic applies.
+5. When the verifier writes its own `result.json` with `acceptance: pass`, the next tick promotes the task to `done`. A verifier rejection sends the task back to `queued` (attempts++) or to `blocked` with `blocked_reason: verifier-rejected-twice`.
+6. The tick commits the worker's `diff.patch` on `done`, with per-agent author attribution and a `Verified-By: <verifier model>` trailer. *(Commit wiring is not yet implemented — see the pass-29 build-log for the open follow-up.)*
 
 ## Control commands (in the Mayor's bottom pane)
 
