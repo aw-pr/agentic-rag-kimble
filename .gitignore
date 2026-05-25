@@ -35,3 +35,5 @@ nvim.log
 !runs/.gitkeep
 !runs/build-log/
 !runs/cost-log.jsonl
+runs/experiment/budget.yaml
+runs/experiment/state.yaml
