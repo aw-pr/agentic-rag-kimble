@@ -1,4 +1,4 @@
-# agentic-rag-kimble
+# Agentic Kimble
 
 **Agentic RAG with a Kimball-structured property graph over OpenML experimental data.**
 
@@ -6,7 +6,8 @@
 
 ---
 
-> **Scope.** Proof of concept and portfolio artefact, not a production system. The retrieval shape is defensible and the eval numbers are honest, but contract drift, boundary-handling gaps, and run-from-clone friction would all need work before this could carry a real workload. The four-way reviewer benchmark (`runs/reviews/`) is explicit about what would have to change at enterprise scale; [Next steps](#next-steps) lists the highest-leverage follow-ups.
+> **Concept**: RAG is one of the earliest enterprise AI deployments, using commercial LLMs to search and surface proprietary corpora. While successful for retrieval they prove unreliable when pulling related concepts together in multi-hop questions. Meanwhile larger context windows in the raw models performed better on small corpora. Graph-based stores with an explicit schema are being proposed as a solution to these shortcomings. This is similar in some respects to the dimensional model popularised by Kimball. This is a PoC to test out that approach.  
+> **About:** The retrieval shape is defensible and the eval numbers are honest, but contract drift, boundary-handling gaps, and run-from-clone friction all need work. The four-way reviewer benchmark (`runs/reviews/`) identified gaps. [Next steps](#next-steps) lists the highest-leverage follow-ups.
 
 ---
 
@@ -45,7 +46,7 @@ flowchart LR
 
 LadybugDB is the community continuation of Kùzu following Apple's acqui-hire in early 2025. All three agent tools -- graph query, semantic search, and aggregate measures -- operate against a single embedded LadybugDB instance. The `VECTOR` extension provides the native HNSW index on dimension-node descriptions; ChromaDB is not used.
 
-> For the design discussion behind these choices — how this scales, how the dimensional model copes with drift, how the project compares with flat RAG and long-context approaches, and where the wider RAG market is heading — see [`docs/discussion.md`](docs/discussion.md).
+> For the design discussion behind these choices — how this scales, how the dimensional model copes with drift, how the project compares with flat RAG and long-context approaches, and where the wider RAG market is heading — see `[docs/discussion.md](docs/discussion.md)`.
 
 ---
 
@@ -185,7 +186,6 @@ The grounding rule produced a real lift (2.4 -> 3.00) but did not reach the 3.5+
 | UI                            | Streamlit                             | `streamlit run src/ui/app.py`             |
 
 **Store portability.** The Kimball schema is the load-bearing decision; LadybugDB is the current implementation. The fact/dimension/snowflake shape transfers to Neo4j, Memgraph, or DuckDB-graph with mechanical Cypher translation (DuckDB-graph would need its property-graph extension or a SQL rewrite). The HNSW vector index would move alongside or split out to pgvector/FAISS. None of this is currently demonstrated, but the schema is not bound to a single vendor.
-
 
 ---
 
