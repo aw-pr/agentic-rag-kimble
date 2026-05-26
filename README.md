@@ -6,8 +6,8 @@
 
 ---
 
-> **Concept**: RAG is one of the earliest enterprise AI deployments, using commercial LLMs to search and surface proprietary corpora. While successful for retrieval they prove unreliable when pulling related concepts together in multi-hop questions. Meanwhile larger context windows in the raw models performed better on small corpora. Graph-based stores with an explicit schema are being proposed as a solution to these shortcomings. This is similar in some respects to the dimensional model popularised by Kimball. This is a PoC to test out that approach.  
-> **About:** The retrieval shape is defensible and the eval numbers are honest, but contract drift, boundary-handling gaps, and run-from-clone friction all need work. The four-way reviewer benchmark (`runs/reviews/`) identified gaps. [Next steps](#next-steps) lists the highest-leverage follow-ups.
+> **Concept**: RAG is one of the earliest enterprise AI deployments, using commercial LLMs to search proprietary corpora. While successful for retrieval they prove unreliable when pulling related concepts together in multi-hop questions. Meanwhile larger context windows in the raw models now perform better on small corpora. Graph-based stores with an explicit schema are being proposed as a solution to these shortcomings. This is similar in some respects to the dimensional model popularised by Kimball.  
+> **About:** The retrieval shape is defensible and the eval numbers are honest, but contract drift, boundary-handling gaps, and run-from-clone friction all need work. The four-way reviewer benchmark (`runs/reviews/`) identified gaps.
 
 ---
 
