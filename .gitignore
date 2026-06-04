@@ -37,3 +37,6 @@ nvim.log
 !runs/cost-log.jsonl
 runs/experiment/budget.yaml
 runs/experiment/state.yaml
+
+# CodeGraph local index cache
+.codegraph/
