@@ -1,53 +1,65 @@
 #!/usr/bin/env bash
 # Publish guard — pre-commit. Blocks personal/machine data and never-commit
-# files from entering the tree. Personal patterns are read from a gitignored
-# .publish-guard.local (seeded from .publish-guard.local.example).
+# files from entering the tree.
+#
+# CANONICAL SOURCE: mcp-hub/templates/git-hooks/pre-commit.
+# Do NOT edit the per-repo copy under scripts/git-hooks/ — edit this template
+# and re-sync (mcp-hub/scripts/sync-all-platforms.sh), then re-arm each repo
+# with scripts/install-guards.sh.
+#
+# Personal patterns are read from a gitignored .publish-guard.local (one ERE
+# regex per line; seeded from .publish-guard.local.example).
+# Private-only paths are exempt from the personal-pattern scan (a tracked file
+# kept off the public mirror may legitimately contain personal data). Defaults
+# below; extend per repo via `git config --add publishguard.exemptpath '<glob>'`.
+# Optional chain points (run if the repo ships them):
+#   scripts/publish-guard-strict-scan.sh   strict positioning-phrase scan
+#   scripts/check-secrets.sh               auth/secret leak guard
 # Override once, intentionally: git commit --no-verify
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-staged="$(git diff --cached --name-only --diff-filter=ACMR)"
-[ -z "$staged" ] && exit 0
 
-# 1. Strict scanner — runs against the working tree (tracked + untracked,
-#    gitignore-aware), exempting only private-tier paths. Catches personal
-#    positioning phrases before they can slip through a `git add -A`.
-#    Pattern list: .publish-guard-strict.local.
+# 0. Strict scanner (if present) — broadest net, runs first.
 if [ -x "$repo_root/scripts/publish-guard-strict-scan.sh" ]; then
   "$repo_root/scripts/publish-guard-strict-scan.sh"
 fi
 
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+[ -z "$staged" ] && exit 0
+
 fail=0
 
-# 2. Never-commit files (regardless of .gitignore state).
+# 1. Never-commit files (regardless of .gitignore state).
 while IFS= read -r f; do
+  [ -z "$f" ] && continue
   case "$f" in
-    .env|.env.*|*.local|op-refs.local.sh|*settings.local.json|state.json|jobs|*/auth.json|*.log)
-      [ "$f" = ".env.example" ] && continue
+    .env.example|*.local.example) continue ;;
+    .env|.env.*|*/.env|*.local|op-refs.local.sh|*settings.local.json|state.json|jobs|*/auth.json|*.log)
       echo "pre-commit: refusing to commit '$f' (machine-specific / secret)." >&2
       fail=1 ;;
   esac
 done <<< "$staged"
 
-# 3. Personal-pattern scan of staged content.
-# Exempt paths (private-only by design; excluded from publish squash per
-# docs/PUBLISH-WORKFLOW.md + HANDOFF.md):
-#   runs/**              scaffold audit trail + build-log retrospectives
-#   archive/**           historical agent prompts with personal paths
-#   HANDOFF.md           private session-handoff notes
-#   RUNBOOK.md           private operator playbook
-#   LICENSE              legitimate copyright attribution
-# The never-commit list above and the leak guard (step 3) still apply.
+# 2. Personal-pattern scan of staged content, skipping exempt (private-only)
+#    paths. Defaults cover common dev-only docs and the *.example configs.
+default_exempt="HANDOFF.md RUNBOOK.md LICENSE CLEANUP-PROMPT.md runs/* archive/* .publish-guard.local.example .publish-guard-strict.local.example"
+extra_exempt="$(git config --get-all publishguard.exemptpath 2>/dev/null | tr '\n' ' ' || true)"
+exempt="$default_exempt $extra_exempt"
+
 local_cfg="$repo_root/.publish-guard.local"
 if [ -f "$local_cfg" ]; then
-  patterns="$(grep -vE '^\s*(#|$)' "$local_cfg" || true)"
+  patterns="$(grep -vE '^[[:space:]]*(#|$)' "$local_cfg" || true)"
   if [ -n "$patterns" ]; then
     while IFS= read -r f; do
+      [ -z "$f" ] && continue
       [ -f "$repo_root/$f" ] || continue
-      case "$f" in
-        runs/*|archive/*|HANDOFF.md|RUNBOOK.md|LICENSE) continue ;;
-        .publish-guard.local.example|.publish-guard-strict.local.example) continue ;;
-      esac
+      skip=0
+      for g in $exempt; do
+        # shellcheck disable=SC2254
+        case "$f" in $g) skip=1; break ;; esac
+      done
+      [ "$skip" -eq 1 ] && continue
       while IFS= read -r pat; do
         [ -z "$pat" ] && continue
         if git show ":$f" 2>/dev/null | grep -nE -- "$pat" >/dev/null 2>&1; then
@@ -64,10 +76,8 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-# 4. Repo-specific extension: chain the auth/secrets leak guard. The three
-#    concerns (strict phrases first; path-aware personal patterns above; auth
-#    leaks below) are enforced through this one hook so none can regress on
-#    commit.
+# 3. Repo-specific chain: auth/secret leak guard (runs if present). Reached
+#    only once the personal-pattern scan is clean.
 if [ -x "$repo_root/scripts/check-secrets.sh" ]; then
   "$repo_root/scripts/check-secrets.sh"
 fi
