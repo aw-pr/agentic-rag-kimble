@@ -50,7 +50,7 @@ FAKE_ALGORITHMS = [
 def main():
     with tempfile.TemporaryDirectory(prefix="lb-vec-spike-pass15-") as tmp:
         tmp_path = Path(tmp)
-        cfg = Config(kuzu_db_path=tmp_path / "kuzu_db")
+        cfg = Config(ladybug_db_path=tmp_path / "ladybug_db")
 
         print(f"Tempdir: {tmp_path}")
 

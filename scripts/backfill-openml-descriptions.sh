@@ -20,7 +20,7 @@
 #   scripts/backfill-openml-descriptions.sh
 #
 # Environment:
-#   KUZU_DB_PATH   override default data/kuzu_db  (optional)
+#   LADYBUG_DB_PATH   override default data/ladybug_db  (optional)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

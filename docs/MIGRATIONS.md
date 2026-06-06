@@ -2,7 +2,7 @@
 
 ## What this is and why
 
-The graph schema in `src/graph/schema.py` used to be created via `CREATE ... IF NOT EXISTS` plus a destructive `reset_schema()` nuke-and-recreate path. That worked for a single-developer greenfield project but gave us no version metadata, no ordered upgrade story, and no way to tell whether a long-lived `data/kuzu_db` store (the single LadybugDB file; the path name is a Kùzu-era leftover) was up-to-date with the code. The migration runner in `src/graph/migrations/` fixes that with the smallest possible footprint: an integer version stored inside the database, a folder of numbered Python modules, and an idempotent runner that applies any migration whose number is newer than the recorded version.
+The graph schema in `src/graph/schema.py` used to be created via `CREATE ... IF NOT EXISTS` plus a destructive `reset_schema()` nuke-and-recreate path. That worked for a single-developer greenfield project but gave us no version metadata, no ordered upgrade story, and no way to tell whether a long-lived `data/ladybug_db` store (the single LadybugDB file, renamed from the Kùzu-era `kuzu_db` in pass-30) was up-to-date with the code. The migration runner in `src/graph/migrations/` fixes that with the smallest possible footprint: an integer version stored inside the database, a folder of numbered Python modules, and an idempotent runner that applies any migration whose number is newer than the recorded version.
 
 ## How to write a new migration
 

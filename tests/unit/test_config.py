@@ -7,19 +7,19 @@ from src.config import REPO_ROOT, Config, get_config
 
 def test_default_config_paths_are_under_repo_root():
     cfg = Config()
-    assert cfg.kuzu_db_path.is_relative_to(REPO_ROOT), (
-        f"kuzu_db_path {cfg.kuzu_db_path} is not under REPO_ROOT {REPO_ROOT}"
+    assert cfg.ladybug_db_path.is_relative_to(REPO_ROOT), (
+        f"ladybug_db_path {cfg.ladybug_db_path} is not under REPO_ROOT {REPO_ROOT}"
     )
     assert cfg.runs_path.is_relative_to(REPO_ROOT), (
         f"runs_path {cfg.runs_path} is not under REPO_ROOT {REPO_ROOT}"
     )
 
 
-def test_env_override_kuzu_path(monkeypatch, tmp_path):
-    override = str(tmp_path / "my_kuzu")
-    monkeypatch.setenv("KUZU_DB_PATH", override)
+def test_env_override_ladybug_path(monkeypatch, tmp_path):
+    override = str(tmp_path / "my_ladybug")
+    monkeypatch.setenv("LADYBUG_DB_PATH", override)
     cfg = get_config()
-    assert cfg.kuzu_db_path == Path(override)
+    assert cfg.ladybug_db_path == Path(override)
 
 
 def test_env_override_openml_max_datasets(monkeypatch):
@@ -63,8 +63,8 @@ def test_chroma_db_path_removed_from_config():
 
 def test_get_config_without_env_vars_returns_defaults(monkeypatch):
     # Ensure none of the override env vars are set
-    for var in ("KUZU_DB_PATH", "OPENML_MAX_DATASETS"):
+    for var in ("LADYBUG_DB_PATH", "OPENML_MAX_DATASETS"):
         monkeypatch.delenv(var, raising=False)
     cfg = get_config()
     assert cfg.openml_max_datasets == 500
-    assert cfg.kuzu_db_path == REPO_ROOT / "data" / "kuzu_db"
+    assert cfg.ladybug_db_path == REPO_ROOT / "data" / "ladybug_db"

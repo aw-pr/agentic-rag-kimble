@@ -8,7 +8,9 @@ REPO_ROOT = Path(__file__).parent.parent
 @dataclass
 class Config:
     # Paths
-    kuzu_db_path: Path = REPO_ROOT / "data" / "kuzu_db"
+    # LadybugDB single-file store. The dataclass field and LADYBUG_DB_PATH env
+    # var were renamed from the Kùzu-era kuzu_db_path / KUZU_DB_PATH in pass-30.
+    ladybug_db_path: Path = REPO_ROOT / "data" / "ladybug_db"
     runs_path: Path = REPO_ROOT / "runs"
 
     # Ingestion scope
@@ -38,8 +40,8 @@ class Config:
 
 def get_config() -> Config:
     cfg = Config()
-    if p := os.getenv("KUZU_DB_PATH"):
-        cfg.kuzu_db_path = Path(p)
+    if p := os.getenv("LADYBUG_DB_PATH"):
+        cfg.ladybug_db_path = Path(p)
     if n := os.getenv("OPENML_MAX_DATASETS"):
         cfg.openml_max_datasets = int(n)
     if n := os.getenv("OPENML_MAX_CONCURRENT_DATASETS"):

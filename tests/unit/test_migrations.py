@@ -36,7 +36,7 @@ from src.graph.migrations import (
 
 def _fresh_conn(tmp_path: Path):
     """Open a LadybugDB connection at tmp_path, with VECTOR loaded."""
-    cfg = Config(kuzu_db_path=tmp_path / "kuzu_test")
+    cfg = Config(ladybug_db_path=tmp_path / "ladybug_test")
     db = GraphDB(cfg)
     db.connect()
     return db
@@ -161,7 +161,7 @@ def test_initial_migration_creates_full_kimball_schema(tmp_path):
     the full Kimball schema — node tables, rel tables, vector indexes."""
     from src.graph.schema import NODE_TABLES, REL_TABLES, VECTOR_INDEXES
 
-    cfg = Config(kuzu_db_path=tmp_path / "kuzu_test")
+    cfg = Config(ladybug_db_path=tmp_path / "ladybug_test")
     with GraphDB(cfg) as db:
         db.initialise_schema()
 
@@ -189,7 +189,7 @@ def test_initial_migration_creates_full_kimball_schema(tmp_path):
 
 def test_reset_then_init_replays_migrations(tmp_path):
     """``reset_schema`` must clear SchemaVersion so migrations replay."""
-    cfg = Config(kuzu_db_path=tmp_path / "kuzu_test")
+    cfg = Config(ladybug_db_path=tmp_path / "ladybug_test")
     with GraphDB(cfg) as db:
         db.initialise_schema()
         v_before = _current_version(db._conn)

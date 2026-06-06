@@ -60,7 +60,7 @@ def test_embedder_dimension_property():
 # ── VectorStore helpers ────────────────────────────────────────────────────────
 
 
-def _make_store(mocker, kuzu_path: str = "/tmp/test_kuzu"):
+def _make_store(mocker, ladybug_path: str = "/tmp/test_ladybug"):
     """
     Build a VectorStore with fully mocked embedder and GraphDB.
 
@@ -73,7 +73,7 @@ def _make_store(mocker, kuzu_path: str = "/tmp/test_kuzu"):
     from src.retrieval.vector_store import VectorStore
 
     cfg = Config()
-    cfg.kuzu_db_path = pathlib.Path(kuzu_path)
+    cfg.ladybug_db_path = pathlib.Path(ladybug_path)
 
     mock_embedder = mocker.MagicMock(spec=Embedder)
     mock_embedder.embed.return_value = [[0.1] * 384]

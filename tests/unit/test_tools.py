@@ -112,7 +112,7 @@ def test_aggregate_accepts_new_algorithm_paradigm():
     from src.config import Config
 
     with tempfile.TemporaryDirectory() as tmp:
-        cfg = Config(kuzu_db_path=Path(tmp) / "kuzu")
+        cfg = Config(ladybug_db_path=Path(tmp) / "ladybug")
         try:
             result = aggregate_measures("algorithm.paradigm", "accuracy", config=cfg)
             assert isinstance(result, list)
@@ -128,7 +128,7 @@ def test_aggregate_accepts_dataset_size_bucket():
     from src.config import Config
 
     with tempfile.TemporaryDirectory() as tmp:
-        cfg = Config(kuzu_db_path=Path(tmp) / "kuzu")
+        cfg = Config(ladybug_db_path=Path(tmp) / "ladybug")
         try:
             result = aggregate_measures("dataset.size_bucket", "f1", config=cfg)
             assert isinstance(result, list)
@@ -146,7 +146,7 @@ def test_aggregate_accepts_valid_group_by_and_measure():
     from src.config import Config
 
     with tempfile.TemporaryDirectory() as tmp:
-        cfg = Config(kuzu_db_path=Path(tmp) / "kuzu")
+        cfg = Config(ladybug_db_path=Path(tmp) / "ladybug")
         # With an empty (but initialised) DB, aggregate_measures should return []
         # rather than raising a validation error.
         try:
@@ -301,7 +301,7 @@ def test_date_year_axis_accepted_by_aggregate_measures():
     from src.config import Config
 
     with tempfile.TemporaryDirectory() as tmp:
-        cfg = Config(kuzu_db_path=Path(tmp) / "kuzu")
+        cfg = Config(ladybug_db_path=Path(tmp) / "ladybug")
         try:
             result = aggregate_measures("date.year", "accuracy", config=cfg)
             assert isinstance(result, list)

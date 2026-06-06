@@ -248,7 +248,7 @@ def test_metrics_runs_without_db():
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = Config(
-            kuzu_db_path=Path(tmp) / "kuzu",
+            ladybug_db_path=Path(tmp) / "ladybug",
 
         )
         result = run_retrieval_eval(cfg)
@@ -260,7 +260,7 @@ def test_metrics_empty_db_recall_is_zero():
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = Config(
-            kuzu_db_path=Path(tmp) / "kuzu",
+            ladybug_db_path=Path(tmp) / "ladybug",
 
         )
         result = run_retrieval_eval(cfg)
@@ -273,7 +273,7 @@ def test_metrics_empty_db_returns_expected_keys():
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = Config(
-            kuzu_db_path=Path(tmp) / "kuzu",
+            ladybug_db_path=Path(tmp) / "ladybug",
 
         )
         result = run_retrieval_eval(cfg)
@@ -288,7 +288,7 @@ def test_metrics_empty_db_populated_false():
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = Config(
-            kuzu_db_path=Path(tmp) / "kuzu",
+            ladybug_db_path=Path(tmp) / "ladybug",
 
         )
         result = run_retrieval_eval(cfg)
@@ -300,7 +300,7 @@ def test_metrics_n_fixtures_correct():
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = Config(
-            kuzu_db_path=Path(tmp) / "kuzu",
+            ladybug_db_path=Path(tmp) / "ladybug",
 
         )
         result = run_retrieval_eval(cfg)

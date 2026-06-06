@@ -23,7 +23,7 @@ def _get_store(config: Config) -> VectorStore:
     """Return a connected VectorStore, reusing the singleton if config matches."""
     global _embedder, _store, _store_config_path
 
-    current_path = str(config.kuzu_db_path)
+    current_path = str(config.ladybug_db_path)
     if _store is None or _store_config_path != current_path:
         _embedder = Embedder(config)
         _store = VectorStore(config, _embedder)
@@ -47,7 +47,7 @@ def semantic_search(
     query       : natural-language query string
     entity_type : one of "Algorithm", "Dataset", "Task"
     top_k       : number of results to return
-    config      : Config (carries kuzu_db_path and embedding_model)
+    config      : Config (carries ladybug_db_path and embedding_model)
 
     Returns
     -------
