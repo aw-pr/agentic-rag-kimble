@@ -49,7 +49,7 @@ def test_task_node_has_required_columns():
     assert "description" in cols
 
 
-def test_node_tables_only_use_allowed_kuzu_types():
+def test_node_tables_only_use_allowed_ladybug_types():
     # FLOAT[384] is the array type used for embedding columns.
     import re
     allowed_scalars = {"INT64", "DOUBLE", "STRING", "BOOLEAN"}

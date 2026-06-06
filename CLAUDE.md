@@ -80,7 +80,7 @@ Check `git log --oneline` to see which passes have completed before resuming.
 
 ## Key rules
 
-- `data/kuzu_db` (the LadybugDB store file; name retained from the Kùzu era) is gitignored (large, recreatable)
+- `data/ladybug_db` (the LadybugDB store file; renamed from the Kùzu-era `kuzu_db` in pass-30) is gitignored (large, recreatable)
 - No `op://` references anywhere in the tree (the old `op-refs.sh` was removed in pass-29)
 - Cypher write operations (CREATE/MERGE/DELETE/SET) must be blocked in `graph_tool.py`
 - All agent tool functions must have unit tests in `tests/unit/`

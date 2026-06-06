@@ -38,8 +38,8 @@ class GraphDB:
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
     def connect(self) -> None:
-        """Open the LadybugDB instance at config.kuzu_db_path, creating the directory if needed."""
-        db_path: Path = self._config.kuzu_db_path
+        """Open the LadybugDB instance at config.ladybug_db_path (creates parent dir)."""
+        db_path: Path = self._config.ladybug_db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = ladybug.Database(str(db_path))
         self._conn = ladybug.Connection(self._db)

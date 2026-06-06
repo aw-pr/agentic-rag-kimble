@@ -34,7 +34,7 @@ def graph_query(cypher: str, explain: str, config: Config) -> list[dict]:
     ----------
     cypher  : A read-only Cypher query (no CREATE/MERGE/DELETE/SET/DROP).
     explain : One sentence explaining why this query answers the user's question.
-    config  : Config carrying kuzu_db_path.
+    config  : Config carrying ladybug_db_path.
 
     Returns
     -------

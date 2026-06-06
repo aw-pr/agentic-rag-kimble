@@ -2,7 +2,7 @@
 Integration tests for src/graph/db.py.
 
 Uses pytest's tmp_path fixture for an isolated DB per test.
-Does NOT touch data/kuzu_db/.
+Does NOT touch data/ladybug_db/.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from src.graph.db import GraphDB
 
 def _make_db(tmp_path) -> GraphDB:
     """Helper: return a GraphDB configured to use tmp_path."""
-    cfg = Config(kuzu_db_path=tmp_path / "kuzu_test")
+    cfg = Config(ladybug_db_path=tmp_path / "ladybug_test")
     return GraphDB(cfg)
 
 
