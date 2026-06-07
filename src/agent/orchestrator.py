@@ -292,7 +292,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Agentic RAG query runner")
     parser.add_argument("--query", required=False, help="Single query to run")
     parser.add_argument("--interactive", action="store_true", help="Interactive REPL mode")
-    parser.add_argument("--check-auth", action="store_true", help="Verify Claude Code is available, then exit")
+    parser.add_argument(
+        "--check-auth",
+        action="store_true",
+        help="Verify Claude Code is available, then exit",
+    )
     args = parser.parse_args()
 
     _check_claude_code_available()

@@ -12,10 +12,10 @@ code path.
 from __future__ import annotations
 
 from src.graph.schema import (
+    _PRIMARY_KEYS,
     NODE_TABLES,
     REL_TABLES,
     VECTOR_INDEXES,
-    _PRIMARY_KEYS,
     _col_defs,
 )
 
