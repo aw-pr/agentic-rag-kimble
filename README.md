@@ -16,10 +16,11 @@
 - Queries 171,250 OpenML experimental runs using a LadybugDB property graph (Cypher) and native HNSW vector index — single embedded store, no separate vector database. 
 - Applies Ralph Kimball's dimensional modelling to the knowledge graph: `Run` is the fact node; `Algorithm`, `Dataset`, `Task`, and a conformed `Date` are dimension nodes with vector-embedded descriptions; `AlgorithmFamily` is a snowflaked outrigger sub-dimension off `Algorithm`
 - Routes each user query to the appropriate retrieval strategy -- structured lookup, semantic similarity, or aggregate analysis -- via a Claude Agent SDK orchestrator (OAuth via Claude Code session; costs charge against Max subscription quota, no API billing)
+- Scores retrieval quality offline via a 20-fixture recall harness; response quality is scored live by a `claude-haiku-4-5` LLM judge sampled at 5 fixtures per run
+
+![Agentic Kimble answering "the most successful algorithm with low-volume, low-dimensional data" — the agent maps the informal question onto the size and dimensionality dimensions, then aggregates accuracy across runs](images/demo-harness-screen-sh.png "Agent harness UI")
 
 > **Heads-up on quota.** Each query may chain several tool calls. The default budget is `agent_max_tool_calls = 15` (about 47 SDK turns); a complex question can burn that and still hit the cap. Bump it in `src/config.py` only when you need to — every extra turn is a real call against your Max quota.
-
-- Scores retrieval quality offline via a 20-fixture recall harness; response quality is scored live by a `claude-haiku-4-5` LLM judge sampled at 5 fixtures per run
 
 ---
 
