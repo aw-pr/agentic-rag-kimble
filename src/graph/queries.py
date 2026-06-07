@@ -1,8 +1,14 @@
 """
 Reusable Cypher query fragments for the agentic-rag-kimble graph.
 
-All queries are read-only (MATCH / RETURN). The graph_query tool enforces
-this by rejecting writes, but we keep it clean here too.
+The read fragments below are all read-only (MATCH / RETURN). The graph_query
+tool enforces this by rejecting writes, but we keep it clean here too.
+
+The write fragments at the bottom (SET_*) are parameterised and intended only
+for ingestion / backfill via GraphDB.execute_write(query, params). They bind
+the free-form description as a $parameter rather than interpolating it into a
+Cypher string literal — this avoids quote/backslash-escaping bugs, is injection
+safe, and keeps long non-ASCII OpenML text off the Cypher parser entirely.
 """
 
 # ── Core queries (from spec) ───────────────────────────────────────────────
@@ -99,4 +105,22 @@ WITH d, count(DISTINCT r.setup_id) AS unique_setups, count(r) AS total_runs,
 RETURN d.dataset_id, d.name, unique_setups, total_runs, mean_acc
 ORDER BY total_runs DESC
 LIMIT $limit
+"""
+
+# ── Write fragments (ingestion / backfill only — via execute_write) ─────────
+# Parameterised: pass {"flow_id"/"dataset_id": int, "description": str}. The
+# description binds as $description, so quotes, backslashes, and long non-ASCII
+# OpenML text never reach the Cypher parser. Setting description_embedding to
+# NULL marks the row for re-embedding by build-index.
+
+SET_ALGORITHM_DESCRIPTION = """
+MATCH (a:Algorithm {flow_id: $flow_id})
+SET a.description = $description,
+    a.description_embedding = NULL
+"""
+
+SET_DATASET_DESCRIPTION = """
+MATCH (d:Dataset {dataset_id: $dataset_id})
+SET d.description = $description,
+    d.description_embedding = NULL
 """

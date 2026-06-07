@@ -36,6 +36,7 @@ import httpx
 
 from src.config import get_config
 from src.graph.db import GraphDB
+from src.graph.queries import SET_ALGORITHM_DESCRIPTION, SET_DATASET_DESCRIPTION
 from src.ingestion.openml_fetch_async import (
     fetch_dataset_description_async,
     fetch_flow_description_async,
@@ -54,15 +55,12 @@ cfg = get_config()
 ALREADY_ENRICHED_LEN = 300
 
 # Bounded concurrency for OpenML fetch calls (pass-14 finding: ~5-6 req/s safe).
-CONCURRENCY = 8
+# Held at 4 (down from 8) so the OpenML fetch fan-out stays well clear of the
+# sustained-load conditions implicated in the pass-26 ingest segfault.
+CONCURRENCY = 4
 BATCH_SIZE = 50  # Process in batches; print progress at each batch boundary.
 
 reset_semaphore(CONCURRENCY)
-
-
-def _q(s: str) -> str:
-    """Escape single quotes for Cypher string literal."""
-    return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
 def _safe_str(v) -> str:
@@ -137,9 +135,8 @@ async def backfill_algorithms(db: GraphDB, client: httpx.AsyncClient) -> dict:
 
             new_desc = existing_desc + " " + openml_desc
             db.execute_write(
-                f"MATCH (a:Algorithm {{flow_id: {fid}}}) "
-                f"SET a.description = {_q(new_desc)}, "
-                f"    a.description_embedding = NULL"
+                SET_ALGORITHM_DESCRIPTION,
+                {"flow_id": fid, "description": new_desc},
             )
             updated += 1
 
@@ -225,9 +222,8 @@ async def backfill_datasets(db: GraphDB, client: httpx.AsyncClient) -> dict:
 
             new_desc = existing_desc + " " + openml_desc
             db.execute_write(
-                f"MATCH (d:Dataset {{dataset_id: {did}}}) "
-                f"SET d.description = {_q(new_desc)}, "
-                f"    d.description_embedding = NULL"
+                SET_DATASET_DESCRIPTION,
+                {"dataset_id": did, "description": new_desc},
             )
             updated += 1
 
