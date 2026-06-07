@@ -30,7 +30,6 @@ from src.graph.migrations import (
     run_migrations,
 )
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
@@ -68,7 +67,6 @@ def test_discover_returns_migrations_sorted_by_number(tmp_path):
     # path, so we import the package and patch its __path__ to point at the
     # tmp dir. Easier: drop fakes into the real package dir? No — we want
     # isolation. Use a direct-import variant by monkeypatching sys.path.
-    import importlib
     import sys
 
     # Make the tmp dir importable as a top-level package.
@@ -80,7 +78,6 @@ def test_discover_returns_migrations_sorted_by_number(tmp_path):
         # call the private helper with a directory and ensure it lists the
         # right numbers in order, even if importing modules fails (we accept
         # an ImportError here and only check the *filename* discovery).
-        from src.graph import migrations as runner_pkg
 
         # importlib lookup happens via runner_pkg.__name__, so we instead
         # exercise the filename-regex sort by reading the directory

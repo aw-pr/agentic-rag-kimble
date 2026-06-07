@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from src.experiment.state import Task, TaskState
 from src.experiment.spawn import planned_command
+from src.experiment.state import Task, TaskState
 
 
 @pytest.fixture()

@@ -38,7 +38,6 @@ import re
 from pathlib import Path
 from typing import Callable, Protocol
 
-
 _MIGRATION_FILENAME_RE = re.compile(r"^(\d{4})_([a-z0-9_]+)\.py$")
 
 

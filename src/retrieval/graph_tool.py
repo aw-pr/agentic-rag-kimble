@@ -8,7 +8,7 @@ against the LadybugDB graph database.
 from __future__ import annotations
 
 from src.config import Config
-from src.graph.db import GraphDB, _WRITE_KEYWORD_RE
+from src.graph.db import _WRITE_KEYWORD_RE, GraphDB
 
 
 def validate_cypher(query: str) -> None:
