@@ -199,7 +199,7 @@ python3 -m pytest tests/unit/ -q        # fast, no network or DB
 ./scripts/smoke-test.sh                  # lint + typecheck + unit tests
 ```
 
-420 unit tests pass. `./scripts/smoke-test.sh` is green end to end -- lint (`ruff`), typecheck (`mypy`, pragmatic baseline, rationale in `pyproject.toml`), unit tests, eval fixtures, and UI import. Run from the repo root.
+533 unit tests pass. `./scripts/smoke-test.sh` is green end to end -- lint (`ruff`), typecheck (`mypy`, pragmatic baseline, rationale in `pyproject.toml`), unit tests, eval fixtures, and UI import. Run from the repo root.
 
 Build provenance: per-pass retrospectives are in `runs/build-log/`.
 
@@ -232,3 +232,11 @@ Surfaced by the May 2026 four-way independent reviewer benchmark (`runs/reviews/
 ## License
 
 MIT. See `LICENSE`.
+
+---
+
+## Version history
+
+| Version | Date | Summary |
+|---|--:|---|
+| v0.3.0 | 2026-06-08 | Snowflaked `AlgorithmFamily` outrigger, Kùzu→LadybugDB rename, OpenML description binding (FU2), and cost/telemetry reporting. |
