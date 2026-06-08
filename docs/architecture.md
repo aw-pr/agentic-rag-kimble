@@ -1,10 +1,10 @@
-## Updated as of pass 29 (2026-05-21)
+## Updated as of pass 30 (2026-06-08)
 
-Last reviewed: 2026-05-21 (pass-29)
+Last reviewed: 2026-06-08 (pass-30)
 
 The original design below describes the pass-09 architecture. The following changes are now in effect:
 
-| Component | Original (pass 09) | Current (pass 29) |
+| Component | Original (pass 09) | Current (pass 30) |
 |---|---|---|
 | Property graph | Kùzu 0.11.3 | LadybugDB 0.16+ (community continuation of Kùzu post Apple acqui-hire, early 2025) |
 | Vector store | ChromaDB (separate embedded store) | LadybugDB native HNSW via VECTOR extension - single store, no ChromaDB |
@@ -122,6 +122,32 @@ aggregate_measures(
 ```
 
 Three canonical tools: `graph_query`, `semantic_search`, `aggregate_measures`.
+
+---
+
+## Cost & telemetry
+
+Every `run_query` appends one JSONL line (`src/agent/cost_log.py`) capturing
+turns, per-tool latencies, token usage, and SDK-reported cost. `scripts/cost-summary.py`
+rolls the log into a report. The table below is a frozen sample of real runs
+(verbatim user queries, typos and all); the raw records are in
+[`sample-cost-log.jsonl`](sample-cost-log.jsonl).
+
+| Query | Turns | Tool calls | Duration (s) | Cost (USD) |
+|---|--:|--:|--:|--:|
+| which algorithums work best with limited data sets? | 13 | 12 | 81.0 | $0.180 |
+| list the best performing algorithums | 6 | 19 | 72.1 | $0.236 |
+| what is the most successful model with low volume variable data? | 12 | 11 | 79.2 | $0.196 |
+| what is the most successful model with low volume low dimensional data? | 10 | 9 | 64.8 | $0.152 |
+| what is the most successful model with low volume low dimensional data? | 9 | 8 | 79.0 | $0.114 |
+| What is the most successful algorithm with low volume low dimensional data? | 14 | 13 | 111.0 | $0.203 |
+| Which algorithm family works best on datasets with severe class imbalance? | 8 | 7 | 86.4 | $0.136 |
+
+Across these runs the agent averages ~10 turns, ~11 tool calls, ~82 s, and
+~$0.17/query. Cost is the SDK's notional figure — actual inference runs against
+Max-subscription quota via OAuth, not metered API billing. Heavy cache reads
+(150k–250k input tokens vs ~3–5k output) reflect the system prompt and tool
+schemas being re-sent each turn of the agent loop.
 
 ---
 
