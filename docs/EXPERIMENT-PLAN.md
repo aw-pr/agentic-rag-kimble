@@ -1,7 +1,8 @@
 # Experimental-rigour scaffold — plan
 
-Status: **draft, not yet executed**. Branch: `pass-29` off `dev`. Do not start
-execution until the open decisions in section J are made.
+Status: **executed** (pass-29). Retained as the historical plan for *how* the
+scaffold was run; the hypothesis spec is `docs/EXPERIMENT.md` and the executed
+state lives under `runs/experiment/`.
 
 ## A. Why a scaffold at all
 
