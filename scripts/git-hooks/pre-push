@@ -12,7 +12,7 @@
 #                              "myorg/myrepo"). Unset -> this hook is inert.
 #   publishguard.sentinel      Env var the sanctioned publish path sets to 1.
 #                              Default: PUBLISH_GUARD_OK
-#   publishguard.historymode   squash (default) | preserve. Informational here;
+#   publishguard.historymode   preserve (default) | squash. Informational here;
 #                              affects merge style upstream, surfaced in errors.
 #   publishguard.privatefile   (repeatable) path that must NEVER reach the
 #                              public tree. Default: HANDOFF.md
@@ -47,7 +47,7 @@ esac
 sentinel="$(git config --get publishguard.sentinel || true)"
 [ -z "$sentinel" ] && sentinel="PUBLISH_GUARD_OK"
 history_mode="$(git config --get publishguard.historymode || true)"
-[ -z "$history_mode" ] && history_mode="squash"
+[ -z "$history_mode" ] && history_mode="preserve"
 
 # Private files that must never reach the public tree (repeatable git config).
 private_files="$(git config --get-all publishguard.privatefile || true)"
