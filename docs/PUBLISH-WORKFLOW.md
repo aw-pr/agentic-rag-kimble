@@ -9,9 +9,17 @@ Placeholders used below: `PRIV` = your private remote (default `origin`),
 (e.g. `myorg/myrepo`), `PUBLISH_BRANCH` = the local line that becomes public
 (this repo uses `publish`).
 
-**History mode for this repo:** `squash` (default). Each adopting repo declares
-its mode here at adoption — flip to `preserve` only after the readiness test
-below. The mode is stored in `git config publishguard.historymode`.
+**History mode for this repo:** `preserve` (since 2026-06-09). The public line
+keeps atomic, per-agent-authored commits — no per-batch squash. The two earlier
+`release:` squashes were rebuilt into their underlying atomic commits and
+force-pushed once (incident-grade, recorded below). The mode is stored in
+`git config publishguard.historymode`.
+
+> **Topology note:** this repo's `publish` line is an **orphan** (no shared
+> ancestry with `dev` — see the seed in step 3). So publishing is not a plain
+> `git merge --ff-only dev`; it is an atomic **cherry-pick** of `dev`'s new
+> commits onto `publish` with private paths stripped (see "Day-to-day"). Never
+> squash them into one commit.
 
 ## Model
 
@@ -21,8 +29,10 @@ below. The mode is stored in `git config publishguard.historymode`.
   (no shared ancestry with the messy history → nothing leaks through).
 - **One permanent publish line** (`PUBLISH_BRANCH`) that fast-forwards onto the
   public default branch (`main`). It is append-only and always publish-clean.
-- **Ephemeral topic branches** for everything else. Squash-merge them into
-  `PUBLISH_BRANCH` when ready. Messy commits never reach the public line.
+- **Atomic publishing.** Bring `dev`'s new public-relevant commits onto
+  `PUBLISH_BRANCH` individually (cherry-pick), private paths stripped — never
+  collapsed into one squash. Private-only commits are dropped; messy/pre-guard
+  history never reaches the public line (the orphan seed is the firewall).
 
 Do **not** add a second permanent "integration" branch unless you actually
 have collaborators, PRs, or CI that need one. The gap between your local
@@ -78,19 +88,33 @@ routine.
 
 ## Day-to-day
 
+Work on `dev` with atomic, per-agent-authored commits. Keep private artefacts
+(`HANDOFF.md`, `RUNBOOK.md`, `runs/`, `archive/`) out of the public surface — the
+publish step strips them, but the cleaner habit is to gitignore them on `dev`.
+
+Because `publish` is an orphan line, publish by cherry-picking `dev`'s new public
+commits onto it (no squash). The range is everything on `dev` not yet on
+`publish`:
+
 ```bash
-git switch -c wip/<thing>        # messy commits, freely
-# …work…
-git switch PUBLISH_BRANCH
-git merge --squash wip/<thing>
-git commit -m "One clean message"
-git publish                      # PRIV PUBLISH_BRANCH, then ff PUB/main
-git branch -D wip/<thing>
+git switch -c publish-sync publish
+for c in $(git rev-list --reverse <last-published-dev-commit>..dev); do
+  git cherry-pick -n "$c" || true
+  git rm -r --cached --ignore-unmatch runs archive RUNBOOK.md HANDOFF.md
+  git diff --cached --quiet && continue        # drop private-only commits
+  git commit -C "$c"                           # preserve message + author
+done
+git diff --stat publish-sync <dev-tip>         # sanity: public-path trees match
+git branch -f publish publish-sync && git switch publish
+git publish                                     # PRIV publish, then ff PUB/main
 ```
 
 `git publish` (alias, set by install-guards) =
 `git push PRIV PUBLISH_BRANCH && PUBLISH_GUARD_OK=1 git push PUB PUBLISH_BRANCH:main`.
-It backs up to the private remote first, then publishes.
+It backs up to the private remote first, then publishes. Each cherry-pick onto an
+orphan base can conflict on files the seed curated differently; resolve toward
+`dev`'s version (`git checkout <c> -- <file>`), since `dev` is the source of
+truth for public content.
 
 ## The gate (why it can't be bypassed by accident)
 
@@ -140,9 +164,17 @@ done
 If anything trips, either `git filter-repo` until clean, or stay on `squash`.
 
 **Switching modes mid-life** is incident-grade for `squash → preserve` (you
-have to rebuild the public seed from a sanitised history and force-push, which
-the gate blocks by default). `preserve → squash` is just "from now on, merge
-with `--squash`" — no rewrite needed.
+have to rebuild the squashed public commits into their atomic originals and
+force-push, which the gate blocks by default). `preserve → squash` is just "from
+now on, collapse" — no rewrite needed.
+
+> **Done here (2026-06-09).** The two `release:` squashes (`e7e40d4`, `1452b9f`)
+> were rebuilt into the 10 atomic `dev` commits they bundled (cherry-picked onto
+> `519eb7b`, private paths stripped) and force-pushed to `PUB/main`. The final
+> tree was verified byte-identical to the pre-rewrite public tip, so only commit
+> granularity changed. Backup bundle: `~/repos/agentic-rag-kimble-backup-20260609.bundle`;
+> the rebuilt line is also on `PRIV` as `publish-atomic`. From here, follow the
+> atomic cherry-pick flow in "Day-to-day"; do not squash again.
 
 ### Squashing rules (both modes)
 
