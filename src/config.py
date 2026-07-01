@@ -31,7 +31,7 @@ class Config:
     openml_max_concurrent_datasets: int = 8
 
     # Agent
-    claude_model: str = "claude-sonnet-4-6"
+    claude_model: str = "claude-sonnet-5"
     agent_max_tool_calls: int = 15
 
     # Eval
