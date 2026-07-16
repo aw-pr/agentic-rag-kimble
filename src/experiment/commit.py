@@ -32,13 +32,13 @@ from src.experiment.state import Task
 # Model → canonical git author identity
 # Extend this table whenever a new worker/verifier family is introduced.
 # The canonical list lives in ~/.claude/rules/mcp-hub-dev-rules.md; the
-# entries below must match that table. gpt-5.5 is a forward-compatible
+# entries below must match that table. GPT-5.6 Sol is a forward-compatible
 # extension of "Codex GPT-5 <codex-gpt-5@local>" — bump the canonical
 # table when this stops being the dev rule.
 # ---------------------------------------------------------------------------
 _MODEL_AUTHORS: dict[str, str] = {
     "sonnet": "Claude Sonnet 4.6 <claude-sonnet-4-6@local>",
-    "gpt-5.5": "Codex GPT-5.5 <codex-gpt-5-5@local>",
+    "gpt-5.6-sol": "GPT-5.6 Sol <gpt-5-6-sol@local>",
 }
 
 

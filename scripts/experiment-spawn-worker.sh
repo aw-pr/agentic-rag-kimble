@@ -5,7 +5,7 @@
 # Reads $workdir/brief.md, parses the optional YAML frontmatter for a
 # `model:` key, and dispatches to the correct LLM CLI:
 #   sonnet  → claude -p --model sonnet --output-format text
-#   gpt-5.5 → codex exec --model gpt-5.5
+#   gpt-5.6-sol → codex exec --model gpt-5.6-sol
 #
 # The model is instructed to write $workdir/result.json on completion.
 # stdout/stderr stream to the inherited file descriptor (tick redirects
@@ -123,14 +123,14 @@ case "$MODEL" in
     # this machine to avoid the OAuth token race (pass-29 bug Z).
     "$SCRIPT_DIR/claude-p-locked.sh" --model sonnet --output-format text "$PROMPT"
     ;;
-  gpt-5.5)
+  gpt-5.6-sol)
     # --sandbox workspace-write: codex defaults to read-only, which blocks
     # any worker output to the workdir (result.json, brief deliverables).
     # workspace-write scopes writes to the current working directory only.
-    codex exec --model gpt-5.5 --sandbox workspace-write "$PROMPT"
+    codex exec --model gpt-5.6-sol --sandbox workspace-write "$PROMPT"
     ;;
   *)
-    echo "experiment-spawn-worker: ERROR — unknown model '$MODEL' (supported: sonnet, gpt-5.5)" >&2
+    echo "experiment-spawn-worker: ERROR — unknown model '$MODEL' (supported: sonnet, gpt-5.6-sol)" >&2
     exit 1
     ;;
 esac

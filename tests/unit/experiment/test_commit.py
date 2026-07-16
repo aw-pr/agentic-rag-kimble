@@ -31,7 +31,7 @@ def _task(**kw: Any) -> Task:
         phase=0,
         tier="T2",
         worker_pref="sonnet",
-        verifier_pref="gpt-5.5",
+        verifier_pref="gpt-5.6-sol",
         state=TaskState.DONE,
     )
     defaults.update(kw)
@@ -95,7 +95,7 @@ def test_known_model_sonnet_maps_correctly() -> None:
 
 
 def test_known_model_gpt55_maps_correctly() -> None:
-    assert _MODEL_AUTHORS["gpt-5.5"] == "Codex GPT-5.5 <codex-gpt-5-5@local>"
+    assert _MODEL_AUTHORS["gpt-5.6-sol"] == "GPT-5.6 Sol <gpt-5-6-sol@local>"
 
 
 def test_unknown_worker_model_returns_error(tmp_path: Path) -> None:
@@ -171,8 +171,8 @@ def test_commit_message_contains_all_required_trailers(tmp_path: Path) -> None:
     assert "Phase: 0" in msg
     assert "Tier: T2" in msg
     assert "Worker: sonnet" in msg
-    assert "Verifier: gpt-5.5" in msg
-    verifier_author = _MODEL_AUTHORS["gpt-5.5"]
+    assert "Verifier: gpt-5.6-sol" in msg
+    verifier_author = _MODEL_AUTHORS["gpt-5.6-sol"]
     assert f"Co-Authored-By: {verifier_author}" in msg
     assert f"Verified-By: {verifier_author}" in msg
     assert "Done; verifier confirmed PASS." in msg
