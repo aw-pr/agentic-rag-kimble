@@ -22,9 +22,12 @@ repo_root="$(git rev-parse --show-toplevel)"
 
 # 0a. Protected-branch guard. The publish branch must only ever advance by
 #     `git merge --ff-only <working-branch>`. A fast-forward creates no commit,
-#     so this hook never fires for it; a direct commit or a non-ff merge here is
-#     exactly how the dev and publish lines diverge, so refuse it. Do the work
-#     on your working branch and fast-forward publish onto it.
+#     so this hook never fires for it; a direct commit here is exactly how the
+#     dev and publish lines diverge, so refuse it. Do the work on your working
+#     branch and fast-forward publish onto it.
+#     Non-ff MERGE commits do not reach this hook — git runs pre-merge-commit
+#     for those, and the companion template delegates back here. Both must be
+#     installed for the branch to be genuinely protected.
 #     Override once, intentionally: git commit --no-verify.
 protected_branch="$(git config --get publishguard.publishbranch || echo publish)"
 current_branch="$(git symbolic-ref --quiet --short HEAD || true)"
