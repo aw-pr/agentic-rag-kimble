@@ -20,23 +20,60 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 
-# 0a. Protected-branch guard. The publish branch must only ever advance by
+# 0a. Protected-branch guard. A protected branch must only ever advance by
 #     `git merge --ff-only <working-branch>`. A fast-forward creates no commit,
 #     so this hook never fires for it; a direct commit here is exactly how the
 #     dev and publish lines diverge, so refuse it. Do the work on your working
-#     branch and fast-forward publish onto it.
+#     branch and fast-forward the protected branch onto it.
+#     More than one branch can be protected — set as many as you need:
+#       git config --add publishguard.publishbranch main
+#       git config --add publishguard.publishbranch publish
+#     With none configured the default is the single branch `publish`.
 #     Non-ff MERGE commits do not reach this hook — git runs pre-merge-commit
 #     for those, and the companion template delegates back here. Both must be
 #     installed for the branch to be genuinely protected.
 #     Override once, intentionally: git commit --no-verify.
-protected_branch="$(git config --get publishguard.publishbranch || echo publish)"
+protected_branches="$(git config --get-all publishguard.publishbranch || true)"
+[ -n "$protected_branches" ] || protected_branches="publish"
 current_branch="$(git symbolic-ref --quiet --short HEAD || true)"
-if [ -n "$current_branch" ] && [ "$current_branch" = "$protected_branch" ]; then
-  echo "pre-commit: refusing a direct commit on '$protected_branch'." >&2
-  echo "  The publish branch only advances by fast-forward from your working branch:" >&2
+
+matched_branch=""
+if [ -n "$current_branch" ]; then
+  while IFS= read -r b; do
+    [ -z "$b" ] && continue
+    if [ "$current_branch" = "$b" ]; then
+      matched_branch="$b"
+      break
+    fi
+  done <<< "$protected_branches"
+fi
+
+# An in-progress cherry-pick is exempt. A repo whose publish line is an ORPHAN
+# (no shared ancestry with dev) cannot fast-forward; its sanctioned publish flow
+# is to cherry-pick dev's commits across, which does create commits on the
+# protected branch. CHERRY_PICK_HEAD exists only while git itself is replaying a
+# commit, so it cannot be reached by a hand-authored `git commit`.
+# Scope note: a clean `git cherry-pick` never runs this hook at all (git does not
+# invoke pre-commit when it replays a commit unattended); the hook is reached
+# only when you conclude a CONFLICTED cherry-pick with `git commit`, which is
+# exactly the case CHERRY_PICK_HEAD covers.
+# NOT covered: `git cherry-pick -n` followed by a separate `git commit`. Git
+# clears CHERRY_PICK_HEAD for --no-commit, leaving that path indistinguishable
+# from a hand-authored commit, so it is deliberately still blocked rather than
+# guessed at. Do that flow on a scratch branch and move the protected ref
+# afterwards (`git switch -c publish-sync <protected>` ... `git branch -f`).
+cherry_pick_in_progress=0
+if git rev-parse --verify --quiet CHERRY_PICK_HEAD >/dev/null 2>&1; then
+  cherry_pick_in_progress=1
+fi
+
+if [ -n "$matched_branch" ] && [ "$cherry_pick_in_progress" -eq 0 ]; then
+  echo "pre-commit: refusing a direct commit on protected branch '$matched_branch'." >&2
+  echo "  A protected branch only advances by fast-forward from your working branch:" >&2
   echo "    git switch <working-branch>   # make your commits here" >&2
-  echo "    git switch $protected_branch && git merge --ff-only <working-branch>" >&2
+  echo "    git switch $matched_branch && git merge --ff-only <working-branch>" >&2
   echo "  A fast-forward creates no commit, so it passes this guard." >&2
+  echo "  Protected branches: $(echo "$protected_branches" | tr '\n' ' ')" >&2
   echo "  Override once, intentionally: git commit --no-verify." >&2
   exit 1
 fi
