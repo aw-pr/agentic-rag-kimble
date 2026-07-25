@@ -20,6 +20,24 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 
+# 0a. Protected-branch guard. The publish branch must only ever advance by
+#     `git merge --ff-only <working-branch>`. A fast-forward creates no commit,
+#     so this hook never fires for it; a direct commit or a non-ff merge here is
+#     exactly how the dev and publish lines diverge, so refuse it. Do the work
+#     on your working branch and fast-forward publish onto it.
+#     Override once, intentionally: git commit --no-verify.
+protected_branch="$(git config --get publishguard.publishbranch || echo publish)"
+current_branch="$(git symbolic-ref --quiet --short HEAD || true)"
+if [ -n "$current_branch" ] && [ "$current_branch" = "$protected_branch" ]; then
+  echo "pre-commit: refusing a direct commit on '$protected_branch'." >&2
+  echo "  The publish branch only advances by fast-forward from your working branch:" >&2
+  echo "    git switch <working-branch>   # make your commits here" >&2
+  echo "    git switch $protected_branch && git merge --ff-only <working-branch>" >&2
+  echo "  A fast-forward creates no commit, so it passes this guard." >&2
+  echo "  Override once, intentionally: git commit --no-verify." >&2
+  exit 1
+fi
+
 # 0. Strict scanner (if present) — broadest net, runs first.
 if [ -x "$repo_root/scripts/publish-guard-strict-scan.sh" ]; then
   "$repo_root/scripts/publish-guard-strict-scan.sh"
