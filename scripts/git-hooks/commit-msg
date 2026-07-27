@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Agent attribution — commit-msg. Appends a vendor Co-Authored-By trailer so the
+# forge shows the agent's logo next to the commit.
+#
+# CANONICAL SOURCE: mcp-hub/templates/git-hooks/commit-msg.
+# Do NOT edit the per-repo copy under scripts/git-hooks/ — edit this template
+# and re-sync (mcp-hub/scripts/sync-guard-hooks.sh), then re-arm each repo with
+# scripts/install-guards.sh.
+#
+# This is a cosmetic attribution hook, not a publish guard. It rides the same
+# distribution path only because that plumbing already exists; a repo missing it
+# loses a logo, never a safety property.
+#
+# Why a trailer and not the author field: `<slug>@local` is deliberately not a
+# routable address, so no forge can resolve it to an account. GitHub resolves a
+# Co-Authored-By address independently, and each vendor publishes an account
+# whose verified address is public. The author slug stays the stable grouping
+# key for `git shortlog`; the trailer supplies the avatar.
+#
+# Fires only for `*@local` authors — human commits are never touched.
+# Skip once: SKIP_AGENT_TRAILER=1 git commit ...
+# Disable per repo: git config agentattrib.enabled false
+set -euo pipefail
+
+msg_file="${1:?commit-msg: missing message file}"
+
+[ "${SKIP_AGENT_TRAILER:-0}" = "1" ] && exit 0
+[ "$(git config --bool agentattrib.enabled 2>/dev/null || echo true)" = "false" ] && exit 0
+
+# git exports GIT_AUTHOR_EMAIL before running this hook, including when the
+# author came from `--author=`. Fall back to configured identity otherwise.
+author_email="${GIT_AUTHOR_EMAIL:-$(git config user.email 2>/dev/null || true)}"
+author_email="$(printf '%s' "$author_email" | tr 'A-Z' 'a-z')"
+
+# Only synthetic agent identities carry a trailer.
+case "$author_email" in
+  *@local) ;;
+  *) exit 0 ;;
+esac
+
+slug="${author_email%@local}"
+
+# Vendor accounts whose verified address GitHub resolves to a logo avatar.
+#   claude                          -> https://github.com/claude
+#   chatgpt-codex-connector[bot]    -> Codex
+#   gemini-code-assist[bot]         -> Gemini
+#   cursoragent                     -> Cursor
+case "$slug" in
+  claude-*)          trailer="Claude <noreply@anthropic.com>" ;;
+  codex-*|gpt-*)     trailer="Codex <199175422+chatgpt-codex-connector[bot]@users.noreply.github.com>" ;;
+  gemini-*)          trailer="Gemini <176961590+gemini-code-assist[bot]@users.noreply.github.com>" ;;
+  cursor)            trailer="Cursor <199161495+cursoragent@users.noreply.github.com>" ;;
+  *)                 exit 0 ;;
+esac
+
+trailer_email="${trailer#*<}"
+trailer_email="${trailer_email%>}"
+
+# An agent that already wrote its own vendor trailer (Claude Code does) keeps it.
+# Match on address alone — the display name varies by model revision.
+if grep -qiF -- "$trailer_email" "$msg_file"; then
+  exit 0
+fi
+
+git interpret-trailers --in-place --trailer "Co-Authored-By: $trailer" "$msg_file"
+exit 0

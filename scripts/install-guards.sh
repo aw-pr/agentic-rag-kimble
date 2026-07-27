@@ -10,7 +10,11 @@ hooks_src="scripts/git-hooks"
 hooks_dst="$(git rev-parse --git-path hooks)"
 mkdir -p "$hooks_dst"
 
-for hook in pre-commit pre-merge-commit pre-push; do
+# Arm every hook present in hooks_src — the canonical set is defined by
+# mcp-hub/templates/git-hooks/, not repeated here.
+for hook_path in "${hooks_src}"/*; do
+  hook="$(basename "$hook_path")"
+  case "$hook" in *.md|*.bak) continue ;; esac
   if [ -f "$hooks_dst/$hook" ] && ! cmp -s "$hooks_src/$hook" "$hooks_dst/$hook"; then
     echo "install-guards: existing $hook differs — backing up to $hook.bak"
     cp "$hooks_dst/$hook" "$hooks_dst/$hook.bak"
