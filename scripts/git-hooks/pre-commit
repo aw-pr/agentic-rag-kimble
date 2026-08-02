@@ -99,6 +99,28 @@ while IFS= read -r f; do
   esac
 done <<< "$staged"
 
+# 1b. Absolute symlink targets. Git stores a symlink as its target path, so an
+#     absolute one bakes a machine path into the tree and dangles in every clone
+#     that does not reproduce the layout exactly. Unconditional rather than
+#     pattern-driven: this is a portability bug whether or not the path names a
+#     person, and the personal-pattern scan below cannot catch it anyway — that
+#     scan skips anything failing `-f`, which is every broken symlink.
+symlinks="$(git diff --cached --raw --diff-filter=ACMR | awk '$2 == "120000" {sub(/^[^\t]*\t/, ""); print}')"
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  # A rename shows src\tdst; the destination is what we are storing.
+  f="${f##*$'\t'}"
+  target="$(git show ":$f" 2>/dev/null || true)"
+  case "$target" in
+    /*)
+      echo "pre-commit: symlink '$f' points at an absolute path ('$target')." >&2
+      echo "  Git stores that path verbatim, so it leaks this machine's layout" >&2
+      echo "  and breaks in any clone. Re-point it relatively, e.g.:" >&2
+      echo "    ln -sfn ../<relative>/<path> '$f' && git add '$f'" >&2
+      fail=1 ;;
+  esac
+done <<< "$symlinks"
+
 # 2. Personal-pattern scan of staged content, skipping exempt (private-only)
 #    paths. Defaults cover common dev-only docs and the *.example configs.
 default_exempt="HANDOFF.md RUNBOOK.md LICENSE CLEANUP-PROMPT.md runs/* archive/* .publish-guard.local.example .publish-guard-strict.local.example"
