@@ -22,6 +22,14 @@
 #   publishguard.prsource      Branch allowed on the PUBLIC remote as a PR
 #                              source (publish → main PR-for-publish flow).
 #                              Default: value of publishguard.publishbranch.
+#   publishguard.boundary      pr (default) | direct. In pr mode the push to
+#                              the public default branch additionally requires
+#                              PUBLISH_PR_REVIEWED=1 in the environment — the
+#                              attestation that a publish→main PR was opened
+#                              and its diff reviewed. The ff push then
+#                              completes the PR (GitHub marks it merged when
+#                              base receives the head SHAs). direct mode keeps
+#                              the sentinel-only gate for repos that opt out.
 #
 # On the public remote: only the default branch (main/master) may be pushed,
 # AND that push must arrive via the sanctioned path (sentinel env set) — i.e.
@@ -108,6 +116,21 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         echo "pre-push: direct publish to PUBLIC remote '$remote_name' blocked." >&2
         echo "          Run 'git publish' — it backs up to the private remote" >&2
         echo "          first, then publishes. Deliberate override: --no-verify." >&2
+        exit 1
+      fi
+      # PR-for-publish boundary (default). The sentinel proves the push came
+      # via the sanctioned alias; this proves a human-reviewable PR diff was
+      # put between the curated head and the public default branch.
+      boundary="$(git config --get publishguard.boundary || true)"
+      [ -z "$boundary" ] && boundary="pr"
+      if [ "$boundary" = "pr" ] && [ "${PUBLISH_PR_REVIEWED:-}" != "1" ]; then
+        echo "pre-push: publish boundary is PR-by-default — push to PUBLIC" >&2
+        echo "          '$remote_ref' needs a reviewed publish PR first:" >&2
+        echo "            1. git push $remote_name ${pr_source:-publish}   (PR source, scanned)" >&2
+        echo "            2. gh pr create --base main --head ${pr_source:-publish}  (review the diff)" >&2
+        echo "            3. re-run with PUBLISH_PR_REVIEWED=1 — the ff push" >&2
+        echo "               completes the PR (GitHub marks it merged)." >&2
+        echo "          Repo-level opt-out: git config publishguard.boundary direct" >&2
         exit 1
       fi
       # Block non-fast-forward to public default branch even with the sentinel.
