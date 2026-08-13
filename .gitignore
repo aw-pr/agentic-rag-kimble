@@ -40,3 +40,6 @@ runs/experiment/state.yaml
 
 # CodeGraph local index cache
 .codegraph/
+
+state/logs/
+.autometta.local.yaml
