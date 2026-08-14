@@ -106,7 +106,9 @@ for c in $(git rev-list --reverse <last-published-dev-commit>..dev); do
 done
 git diff --stat publish-sync <dev-tip>         # sanity: public-path trees match
 git branch -f publish publish-sync && git switch publish
-git publish                                     # PRIV publish, then ff PUB/main
+git push PUB publish                            # PR source; gh pr create --base main --head publish
+# review the PR diff (private-tier paths must be absent), then:
+PUBLISH_PR_REVIEWED=1 git publish               # PRIV publish, then ff PUB/main (completes the PR)
 ```
 
 `git publish` (alias, set by install-guards) =
@@ -121,9 +123,14 @@ truth for public content.
 `pre-push` fails closed on the public remote (matched by
 `publishguard.publicmatch`):
 
-- non-default branch to public → rejected;
+- non-default branch to public → rejected, except the configured PR source
+  (`publishguard.prsource`, default `publish`), which is allowed
+  private-file-scanned so the publish→main PR can exist;
 - default branch to public → rejected **unless** the `PUBLISH_GUARD_OK=1`
-  sentinel is set, which only `git publish` does.
+  sentinel is set, which only `git publish` does, **and**
+  `PUBLISH_PR_REVIEWED=1` attests the publish PR diff was reviewed
+  (`publishguard.boundary`, default `pr`; opt out per repo with
+  `git config publishguard.boundary direct`).
 
 So a hand-typed `git push PUB PUBLISH_BRANCH:main` is blocked and told to use
 `git publish` (which guarantees the private backup happened first). Deliberate
