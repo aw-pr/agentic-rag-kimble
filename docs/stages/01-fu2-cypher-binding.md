@@ -5,12 +5,42 @@
 - **Authored:** 2026-08-13
 - **Orchestrator:** Claude Fable 5 <claude-fable-5@local>
 - **Worker:** Claude Opus 5 <claude-opus-5@local>
-- **Verifier:** Codex GPT-5.6 Terra <codex-gpt-5-6-terra@local>
+- **Verifier:** GPT-5.6 Sol <gpt-5-6-sol@local>
+- **Worker effort:** low
+- **Verifier effort:** medium
 - **Verifier panel:** false
 - **Pairing rationale:** Hypothesis-driven debugging of an intermittent rc=139
   segfault wants a frontier Claude tier; the binding refactor and its tests
   are then cross-family verified by a Codex tier that re-runs the suite
   outside the worker sandbox.
+
+## Re-brief 2026-08-14: this is a confirmation round, not a rebuild
+
+Round 1 ran on 2026-08-13 and every deliverable is already in the tree. It
+reported `partial` for one reason only: acceptance criterion 1 was failing on
+`tests/unit/test_config.py::test_claude_model_default`, an unrelated
+pre-existing model-string drift that the worker correctly declined to fix
+inside this stage's commit. That drift was fixed separately in `56291cc`, and
+the suite is now 533 passed / 0 failed.
+
+The stage was nonetheless hand-marked `completed` in `state.yaml` on a
+`partial` envelope and a verifier that left no artefact, so this work has
+never actually been verified. That is what this round is for.
+
+What already landed, and must not be redone:
+
+- Deliverables 1-3 predate the card, in ancestor commit `319c7ba` (2026-06-07):
+  `queries.py` uses `$description` bind params, `openml_fetch_async.py` builds
+  no Cypher, and `tests/unit/test_queries_binding.py` has 16 tests covering
+  non-ASCII, quotes, backslashes, control chars, ~3KB unicode and two
+  injection payloads.
+- Deliverables 4-5 landed in round 1 as `b642006`: the checkpointed backfill
+  script and `runs/build-log/pass-30-fu2-note.md`.
+
+Your job is to confirm all five against the criteria below and report, not to
+rewrite working code. If every criterion holds, emit `pass` — the criteria are
+now genuinely satisfiable, which they were not in round 1. Only make changes
+if a criterion is actually unmet, and say which.
 
 ## Objective
 
@@ -60,7 +90,7 @@ Do not read anything else unless you need to; keep your context lean.
 The verifier will check each of these. Failure of any one is a failure of the stage.
 
 1. `python3 -m pytest tests/unit/ -q` green, including the new binding tests
-   (baseline 420 unit tests, 0 fail).
+   (533 unit tests, 0 fail — confirmed green on 2026-08-14).
 2. No f-string/format/percent interpolation of description content into
    Cypher remains in the two named source files.
 3. New tests genuinely exercise non-ASCII and injection-like strings.
