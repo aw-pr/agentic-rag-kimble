@@ -25,15 +25,22 @@ repo_root="$(git rev-parse --show-toplevel)"
 #     so this hook never fires for it; a direct commit here is exactly how the
 #     dev and publish lines diverge, so refuse it. Do the work on your working
 #     branch and fast-forward the protected branch onto it.
-#     More than one branch can be protected — set as many as you need:
-#       git config --add publishguard.publishbranch main
-#       git config --add publishguard.publishbranch publish
-#     With none configured the default is the single branch `publish`.
+#     Two orthogonal keys name protected branches and this guard refuses a
+#     direct commit on the UNION of both. They differ only in what a *push*
+#     means, which is git-push-check's problem, not this hook's:
+#       git config --add releasetrain.protectedbranch main      # release trunk
+#       git config --add publishguard.publishbranch  publish    # mirror head
+#     Either key may be set as many times as you need. With neither configured
+#     the default is the single branch `publish`.
 #     Non-ff MERGE commits do not reach this hook — git runs pre-merge-commit
 #     for those, and the companion template delegates back here. Both must be
 #     installed for the branch to be genuinely protected.
 #     Override once, intentionally: git commit --no-verify.
-protected_branches="$(git config --get-all publishguard.publishbranch || true)"
+protected_branches="$(
+  { git config --get-all releasetrain.protectedbranch || true
+    git config --get-all publishguard.publishbranch  || true
+  } | sed '/^[[:space:]]*$/d' | sort -u
+)"
 [ -n "$protected_branches" ] || protected_branches="publish"
 current_branch="$(git symbolic-ref --quiet --short HEAD || true)"
 
@@ -74,6 +81,7 @@ if [ -n "$matched_branch" ] && [ "$cherry_pick_in_progress" -eq 0 ]; then
   echo "    git switch $matched_branch && git merge --ff-only <working-branch>" >&2
   echo "  A fast-forward creates no commit, so it passes this guard." >&2
   echo "  Protected branches: $(echo "$protected_branches" | tr '\n' ' ')" >&2
+  echo "  (union of releasetrain.protectedbranch and publishguard.publishbranch)" >&2
   echo "  Override once, intentionally: git commit --no-verify." >&2
   exit 1
 fi

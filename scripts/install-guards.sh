@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # Idempotent installer for the publish guards. Re-runnable; only fills gaps.
-# Arms .git/hooks/{pre-commit,pre-push} from scripts/git-hooks/ and seeds a
-# gitignored .publish-guard.local from the committed .example.
+# Arms .git/hooks/* from every hook present in scripts/git-hooks/ (the
+# canonical set is defined by mcp-hub/templates/git-hooks/, not repeated
+# here — glob so a new hook, e.g. commit-msg, is picked up without editing
+# this script) and seeds a gitignored .publish-guard.local from the
+# committed .example.
+#
+# Canonical copy: mcp-hub/templates/git-hooks/install-guards.sh, distributed
+# by scripts/sync-guard-hooks.sh into each participating repo's scripts/.
+# Do not hand-edit the per-repo copy — it drifts; edit the canonical copy.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -10,9 +17,7 @@ hooks_src="scripts/git-hooks"
 hooks_dst="$(git rev-parse --git-path hooks)"
 mkdir -p "$hooks_dst"
 
-# Arm every hook present in hooks_src — the canonical set is defined by
-# mcp-hub/templates/git-hooks/, not repeated here.
-for hook_path in "${hooks_src}"/*; do
+for hook_path in "$hooks_src"/*; do
   hook="$(basename "$hook_path")"
   case "$hook" in *.md|*.bak) continue ;; esac
   if [ -f "$hooks_dst/$hook" ] && ! cmp -s "$hooks_src/$hook" "$hooks_dst/$hook"; then
@@ -24,8 +29,12 @@ for hook_path in "${hooks_src}"/*; do
 done
 
 if [ ! -f .publish-guard.local ]; then
-  cp .publish-guard.local.example .publish-guard.local
-  echo "install-guards: seeded .publish-guard.local — edit it with your real patterns"
+  if [ -f .publish-guard.local.example ]; then
+    cp .publish-guard.local.example .publish-guard.local
+    echo "install-guards: seeded .publish-guard.local — edit it with your real patterns"
+  else
+    echo "install-guards: WARN no .publish-guard.local.example to seed from" >&2
+  fi
 else
   echo "install-guards: .publish-guard.local already present — left untouched"
 fi
@@ -36,11 +45,15 @@ fi
 git config --get publishguard.sentinel >/dev/null 2>&1 \
   || git config publishguard.sentinel PUBLISH_GUARD_OK
 
-# History mode: `squash` (default — orphan-squash seed, --squash merges) or
-# `preserve` (filter-repo seed, --no-ff merges, per-commit cleanliness required).
-# See docs/PUBLISH-WORKFLOW.md "History mode" for the trade-off.
+# History mode: `preserve` (default — filter-repo seed, --no-ff merges,
+# per-commit cleanliness required) or `squash` (orphan-squash seed, --squash
+# merges). The family default flipped to preserve on 2026-06-09 so a repo
+# adopting the guards publishes atomic public history with no per-repo config;
+# templates/git-hooks/pre-push documents the same default. Do not reintroduce
+# squash here — the older per-repo installers still carrying it are the drift
+# this canonical copy exists to end.
 git config --get publishguard.historymode >/dev/null 2>&1 \
-  || git config publishguard.historymode squash
+  || git config publishguard.historymode preserve
 
 pub_match="$(git config --get publishguard.publicmatch || true)"
 pub_remote="$(git config --get publishguard.publicremote || true)"
