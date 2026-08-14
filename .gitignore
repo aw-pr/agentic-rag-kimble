@@ -43,3 +43,9 @@ runs/experiment/state.yaml
 
 state/logs/
 .autometta.local.yaml
+
+# Per-run controller churn: rewritten every tick, worthless across runs.
+# state/cost-log.jsonl is deliberately not here — it appends rather than
+# rewrites, and it is the spend ledger FinOps reads.
+state/heartbeat.json
+state/recent-agents/
