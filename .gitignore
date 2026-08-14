@@ -43,6 +43,9 @@ runs/experiment/state.yaml
 
 state/logs/
 .autometta.local.yaml
+# Backups the repoint tooling drops beside it. The base file is ignored, so
+# its backups must be too, or an untracked .bak halts the next tick.
+.autometta.local.yaml.bak-*
 
 # Per-run controller churn: rewritten every tick, worthless across runs.
 # state/cost-log.jsonl is deliberately not here — it appends rather than
