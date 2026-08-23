@@ -17,7 +17,24 @@
 # whose verified address is public. The author slug stays the stable grouping
 # key for `git shortlog`; the trailer supplies the avatar.
 #
-# Fires only for `*@local` authors — human commits are never touched.
+# The hook considers every agent on the commit, not just the author: a Codex
+# worker with a Claude co-author gets both vendor trailers, so the forge shows
+# every model that touched the change.
+#
+# It also normalises the identities it finds, because three spellings of one
+# model render as three separate people on a commit page and split `git
+# shortlog`:
+#   - a role parenthetical is dropped from an `@local` identity — a slug is an
+#     identity, `(verifier)` is a job it happened to be doing;
+#   - a co-author repeating the author is dropped as noise;
+#   - a vendor address carrying a per-model display name (Claude Code writes
+#     its own revision into the trailer) is rewritten to the canonical name.
+# The author field is not ours to touch — fix a suffixed author at the source
+# by calling `scripts/agent-whoami` instead of pasting an identity literal.
+#
+# A vendor trailer is only ever *added* for an `*@local` identity, so a human
+# commit never grows one. An existing trailer is still normalised on any commit,
+# which is what tidies the merge commits a human makes over agent work.
 # Skip once: SKIP_AGENT_TRAILER=1 git commit ...
 # Disable per repo: git config agentattrib.enabled false
 set -euo pipefail
@@ -32,35 +49,82 @@ msg_file="${1:?commit-msg: missing message file}"
 author_email="${GIT_AUTHOR_EMAIL:-$(git config user.email 2>/dev/null || true)}"
 author_email="$(printf '%s' "$author_email" | tr 'A-Z' 'a-z')"
 
-# Only synthetic agent identities carry a trailer.
-case "$author_email" in
-  *@local) ;;
-  *) exit 0 ;;
-esac
+# Vendor accounts whose address GitHub resolves to a logo avatar.
+#   claude                          -> https://github.com/claude            (User 81847)
+#   chatgpt-codex-connector[bot]    -> Codex   (Bot 199175422, avatar in/1144995)
+#   gemini-code-assist[bot]         -> Gemini  (Bot 176961590, avatar in/956858)
+#   cursoragent                     -> Cursor  (User 199161495)
+# The Codex and Gemini knots are black line art on transparent, so they read as
+# blank squares on a dark-theme commit page. That is the vendor's asset, not a
+# broken trailer; the address resolves either way.
+vendor_trailer_for() {
+  case "${1%@local}" in
+    claude-*)      printf 'Claude <noreply@anthropic.com>' ;;
+    codex-*|gpt-*) printf 'Codex <199175422+chatgpt-codex-connector[bot]@users.noreply.github.com>' ;;
+    gemini-*)      printf 'Gemini <176961590+gemini-code-assist[bot]@users.noreply.github.com>' ;;
+    cursor)        printf 'Cursor <199161495+cursoragent@users.noreply.github.com>' ;;
+    *)             return 1 ;;
+  esac
+}
 
-slug="${author_email%@local}"
+work="$(mktemp)"
+trap 'rm -f "$work"' EXIT
 
-# Vendor accounts whose verified address GitHub resolves to a logo avatar.
-#   claude                          -> https://github.com/claude
-#   chatgpt-codex-connector[bot]    -> Codex
-#   gemini-code-assist[bot]         -> Gemini
-#   cursoragent                     -> Cursor
-case "$slug" in
-  claude-*)          trailer="Claude <noreply@anthropic.com>" ;;
-  codex-*|gpt-*)     trailer="Codex <199175422+chatgpt-codex-connector[bot]@users.noreply.github.com>" ;;
-  gemini-*)          trailer="Gemini <176961590+gemini-code-assist[bot]@users.noreply.github.com>" ;;
-  cursor)            trailer="Cursor <199161495+cursoragent@users.noreply.github.com>" ;;
-  *)                 exit 0 ;;
-esac
+# Pass 1 — tidy the `@local` co-author trailers already in the message.
+awk -v author="$author_email" '
+  tolower($0) ~ /^co-authored-by:[ \t]*/ && match($0, /<[^>]+>[ \t]*$/) {
+    addr = substr($0, RSTART + 1, RLENGTH - 2)
+    sub(/[ \t]+$/, "", addr)
+    if (tolower(addr) ~ /@local$/) {
+      if (tolower(addr) == author) next
+      name = substr($0, index($0, ":") + 1, RSTART - index($0, ":") - 1)
+      sub(/^[ \t]+/, "", name); sub(/[ \t]+$/, "", name)
+      sub(/[ \t]*\([^()]*\)$/, "", name)
+      print "Co-Authored-By: " name " <" addr ">"
+      next
+    }
+  }
+  { print }
+' "$msg_file" > "$work"
+cp "$work" "$msg_file"
 
-trailer_email="${trailer#*<}"
-trailer_email="${trailer_email%>}"
+# Every synthetic identity on the commit: the author plus surviving co-authors.
+slugs="$author_email"
+slugs="$slugs
+$(awk 'tolower($0) ~ /^co-authored-by:[ \t]*/ && match($0, /<[^>]+>[ \t]*$/) {
+    addr = tolower(substr($0, RSTART + 1, RLENGTH - 2)); sub(/[ \t]+$/, "", addr)
+    if (addr ~ /@local$/) print addr
+  }' "$msg_file")"
 
-# An agent that already wrote its own vendor trailer (Claude Code does) keeps it.
-# Match on address alone — the display name varies by model revision.
-if grep -qiF -- "$trailer_email" "$msg_file"; then
-  exit 0
-fi
+needed=""
+for slug in $(printf '%s\n' "$slugs" | grep '@local$' | sort -u); do
+  trailer="$(vendor_trailer_for "$slug")" || continue
+  needed="$needed$trailer
+"
+done
 
-git interpret-trailers --in-place --trailer "Co-Authored-By: $trailer" "$msg_file"
+# Walk every vendor, not only the ones a slug implied: a trailer can be the sole
+# record of a vendor on the commit (Claude Code writes its own before the hook
+# runs), and it still needs the canonical spelling.
+printf '%s\n' \
+  'claude-x@local' 'codex-x@local' 'gemini-x@local' 'cursor@local' |
+while IFS= read -r probe; do
+  trailer="$(vendor_trailer_for "$probe")" || continue
+  addr="${trailer#*<}"; addr="${addr%>}"
+
+  if grep -qiF -- "$addr" "$msg_file"; then
+    # Collapse every trailer bearing this address onto the canonical spelling,
+    # keeping the first occurrence's position.
+    awk -v addr="$addr" -v canon="Co-Authored-By: $trailer" '
+      tolower($0) ~ /^co-authored-by:/ && index($0, addr) {
+        if (!seen++) print canon
+        next
+      }
+      { print }
+    ' "$msg_file" > "$work"
+    cp "$work" "$msg_file"
+  elif printf '%s' "$needed" | grep -qxF -- "$trailer"; then
+    git interpret-trailers --in-place --trailer "Co-Authored-By: $trailer" "$msg_file"
+  fi
+done
 exit 0

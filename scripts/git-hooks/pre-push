@@ -22,14 +22,13 @@
 #   publishguard.prsource      Branch allowed on the PUBLIC remote as a PR
 #                              source (publish → main PR-for-publish flow).
 #                              Default: value of publishguard.publishbranch.
-#   publishguard.boundary      pr (default) | direct. In pr mode the push to
-#                              the public default branch additionally requires
-#                              PUBLISH_PR_REVIEWED=1 in the environment — the
-#                              attestation that a publish→main PR was opened
-#                              and its diff reviewed. The ff push then
-#                              completes the PR (GitHub marks it merged when
-#                              base receives the head SHAs). direct mode keeps
-#                              the sentinel-only gate for repos that opt out.
+#   publishguard.boundary      pr (default) | direct. In pr mode the public
+#                              default branch may not be pushed at all: it
+#                              advances only by a merge performed on the forge,
+#                              where the diff is visible first. Push the
+#                              prsource branch and open a PR instead. direct
+#                              mode keeps the sentinel-only gate for repos that
+#                              opt out.
 #
 # On the public remote: only the default branch (main/master) may be pushed,
 # AND that push must arrive via the sanctioned path (sentinel env set) — i.e.
@@ -118,18 +117,26 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         echo "          first, then publishes. Deliberate override: --no-verify." >&2
         exit 1
       fi
-      # PR-for-publish boundary (default). The sentinel proves the push came
-      # via the sanctioned alias; this proves a human-reviewable PR diff was
-      # put between the curated head and the public default branch.
+      # PR-for-publish boundary (default). The public default branch advances
+      # by a merge performed on the forge, never by this push.
+      #
+      # There is deliberately no environment-variable escape hatch. The old
+      # PUBLISH_PR_REVIEWED flag was an assertion by whoever was pushing, not a
+      # check on anything, and the recipe printed below used to end with it: so
+      # a PR was opened and completed by ff push seconds later, which makes the
+      # forge stamp it merged without a diff ever being read. Five consecutive
+      # publishes went out that way, each PR created and closed 11-17s apart
+      # with zero reviews. A gate that the gated party can open is not a gate.
       boundary="$(git config --get publishguard.boundary || true)"
       [ -z "$boundary" ] && boundary="pr"
-      if [ "$boundary" = "pr" ] && [ "${PUBLISH_PR_REVIEWED:-}" != "1" ]; then
-        echo "pre-push: publish boundary is PR-by-default — push to PUBLIC" >&2
-        echo "          '$remote_ref' needs a reviewed publish PR first:" >&2
+      if [ "$boundary" = "pr" ]; then
+        echo "pre-push: publish boundary is PR-by-default — the PUBLIC default" >&2
+        echo "          branch advances by a reviewed merge, not by this push:" >&2
         echo "            1. git push $remote_name ${pr_source:-publish}   (PR source, scanned)" >&2
-        echo "            2. gh pr create --base main --head ${pr_source:-publish}  (review the diff)" >&2
-        echo "            3. re-run with PUBLISH_PR_REVIEWED=1 — the ff push" >&2
-        echo "               completes the PR (GitHub marks it merged)." >&2
+        echo "            2. gh pr create --base ${remote_ref#refs/heads/} --head ${pr_source:-publish}" >&2
+        echo "            3. read the diff on the forge and merge it there." >&2
+        echo "          Protect the public default branch too, so the forge" >&2
+        echo "          rejects a direct push even if this hook is missing." >&2
         echo "          Repo-level opt-out: git config publishguard.boundary direct" >&2
         exit 1
       fi
