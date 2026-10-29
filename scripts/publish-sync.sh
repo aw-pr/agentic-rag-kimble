@@ -147,8 +147,9 @@ commit_is_private_only() {
 # source commit it came from; the newest one on the target is the watermark.
 # No trailer means the lines have not diverged through this script yet, and
 # the target itself is the right base.
+# Drain the log so a large history cannot SIGPIPE git under pipefail.
 watermark="$(git log "$target_branch" --format='%(trailers:key=Publish-Sync-Source,valueonly)' \
-  | awk 'NF { print $1; exit }')"
+  | awk 'NF && !found { print $1; found=1 }')"
 base="$target_branch"
 if [ -n "$watermark" ]; then
   if git rev-parse --verify --quiet "$watermark^{commit}" >/dev/null; then

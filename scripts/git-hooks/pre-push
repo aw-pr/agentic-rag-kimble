@@ -57,7 +57,7 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 # Strict scanner — runs on every push, regardless of remote, if the repo ships
 # one. Catches personal positioning phrases before any push leaves the laptop.
 if [ -n "$repo_root" ] && [ -x "$repo_root/scripts/publish-guard-strict-scan.sh" ]; then
-  "$repo_root/scripts/publish-guard-strict-scan.sh"
+  "$repo_root/scripts/publish-guard-strict-scan.sh" || exit $?
 fi
 
 pub_match="$(git config --get publishguard.publicmatch || true)"
@@ -93,10 +93,17 @@ check_privatefile() {
   sha="$1"
   ref="$2"
   [ "$sha" = "$zero" ] && return 0
-  pub_tree="$(git ls-tree -r --name-only "$sha" 2>/dev/null || true)"
+  if ! git cat-file -e "${sha}^{tree}" 2>/dev/null; then
+    echo "pre-push: cannot read the tree pushed to PUBLIC '$ref' — blocked." >&2
+    return 1
+  fi
   while IFS= read -r pf; do
     [ -z "$pf" ] && continue
-    if printf '%s\n' "$pub_tree" | grep -qx "$pf"; then
+    if ! private_matches="$(git --literal-pathspecs ls-tree -r --name-only "$sha" -- "${pf%/}" 2>/dev/null)"; then
+      echo "pre-push: cannot check private path '$pf' — blocked." >&2
+      return 1
+    fi
+    if [ -n "$private_matches" ]; then
       echo "pre-push: private file '$pf' present in the tree pushed to" >&2
       echo "          PUBLIC '$ref' — blocked. It is dev-only; keep it" >&2
       echo "          out of the publish tree. Deliberate override: --no-verify." >&2
