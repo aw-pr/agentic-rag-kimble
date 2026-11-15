@@ -7,7 +7,7 @@
 ---
 
 > **Concept**: RAG is one of the earliest enterprise AI deployments, using commercial LLMs to search proprietary corpora. While successful for retrieval they prove unreliable when pulling related concepts together in multi-hop questions. Meanwhile larger context windows in the raw models now perform better on small corpora. Graph-based stores with an explicit schema are being proposed as a solution to these shortcomings. This is similar in some respects to the dimensional model popularised by Kimball.  
-> **About:** The retrieval shape is defensible and the eval numbers are honest, but contract drift, boundary-handling gaps, and run-from-clone friction all need work. The four-way reviewer benchmark (`runs/reviews/`) identified gaps.
+> **About:** The retrieval shape is defensible and the eval numbers are honest, but contract drift, boundary-handling gaps, and run-from-clone friction all need work. The four-way reviewer benchmark (`runs/reviews/` in the private working repo) identified gaps.
 
 ---
 
@@ -201,7 +201,7 @@ python3 -m pytest tests/unit/ -q        # fast, no network or DB
 
 533 unit tests pass. `./scripts/smoke-test.sh` is green end to end -- lint (`ruff`), typecheck (`mypy`, pragmatic baseline, rationale in `pyproject.toml`), unit tests, eval fixtures, and UI import. Run from the repo root.
 
-Build provenance: per-pass retrospectives are in `runs/build-log/`.
+Build provenance: per-pass retrospectives are in `runs/build-log/`. The `runs/` tree stays in the private working repository and is not published to this mirror, so the `runs/` paths cited in this README are references to that log, not links.
 
 ---
 
