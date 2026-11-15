@@ -48,11 +48,11 @@ Nodes and required properties:
 | Node label | Required properties | Optional |
 |---|---|---|
 | `Run` | `run_id`, `accuracy`, `setup_id` | `f1`, `auc`, `runtime_sec`, `memory_mb` |
-| `Algorithm` | `flow_id`, `name`, `description` | `hyperparameter_schema` |
-| `AlgorithmFamily` | `family_id`, `name`, `description` | |
-| `Dataset` | `dataset_id`, `name`, `n_rows`, `n_features`, `n_classes` | `imbalance_ratio`, `domain_tags` |
+| `Algorithm` | `flow_id`, `name`, `description` | `display_name`, `family`, `paradigm`, `is_ensemble`, `training_cost_class` |
+| `AlgorithmFamily` | `family_id`, `family_name`, `description` | `display_name`, `paradigm`, `interpretability`, `typical_use_case` |
+| `Dataset` | `dataset_id`, `name`, `n_rows`, `n_features`, `n_classes` | `imbalance_ratio`, `size_bucket`, `dim_bucket`, `imbalance_bucket`, `domain_tags` |
 | `Task` | `task_id`, `task_type`, `target_feature`, `evaluation_measure` | |
-| `Date` | `date_key` (`YYYYMMDD`) | `year`, `month`, `day` |
+| `Date` | `date_id` (`YYYYMMDD`) | `date`, `year`, `quarter`, `month`, `month_name`, `day_of_week`, `is_weekend` |
 
 Edges:
 
@@ -63,6 +63,7 @@ Edges:
 | `Run` | `ON_DATASET` | `Dataset` |
 | `Run` | `FOR_TASK` | `Task` |
 | `Run` | `RUN_ON_DATE` | `Date` |
+| `Dataset` | `PART_OF_TASK` | `Task` |
 
 Vector indexes:
 - `Algorithm.description`
