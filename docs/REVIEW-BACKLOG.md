@@ -5,6 +5,11 @@ by priority and framed as bounded passes, each ending with a green suite. Run
 when tokens allow. Line references were accurate at review time; re-confirm
 before editing.
 
+**Status at 2026-11-15:** 1.1 is resolved (the config test asserts
+`claude-sonnet-5`, `pytest-mock` is in `requirements-dev.txt`, and the unit
+suite is 533 passed). Item 1 of section 4 is resolved for the public docs: the
+README badge and body both say 533. Everything else below is still open.
+
 ## Suggested order (highest value first)
 
 1. **Red-to-green pass** — restore the test gate's meaning. Small.
