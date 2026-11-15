@@ -20,6 +20,72 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 
+# 0a. Protected-branch guard. A protected branch must only ever advance by
+#     `git merge --ff-only <working-branch>`. A fast-forward creates no commit,
+#     so this hook never fires for it; a direct commit here is exactly how the
+#     dev and publish lines diverge, so refuse it. Do the work on your working
+#     branch and fast-forward the protected branch onto it.
+#     Two orthogonal keys name protected branches and this guard refuses a
+#     direct commit on the UNION of both. They differ only in what a *push*
+#     means, which is git-push-check's problem, not this hook's:
+#       git config --add releasetrain.protectedbranch main      # release trunk
+#       git config --add publishguard.publishbranch  publish    # mirror head
+#     Either key may be set as many times as you need. With neither configured
+#     the default is the single branch `publish`.
+#     Non-ff MERGE commits do not reach this hook — git runs pre-merge-commit
+#     for those, and the companion template delegates back here. Both must be
+#     installed for the branch to be genuinely protected.
+#     Override once, intentionally: git commit --no-verify.
+protected_branches="$(
+  { git config --get-all releasetrain.protectedbranch || true
+    git config --get-all publishguard.publishbranch  || true
+  } | sed '/^[[:space:]]*$/d' | sort -u
+)"
+[ -n "$protected_branches" ] || protected_branches="publish"
+current_branch="$(git symbolic-ref --quiet --short HEAD || true)"
+
+matched_branch=""
+if [ -n "$current_branch" ]; then
+  while IFS= read -r b; do
+    [ -z "$b" ] && continue
+    if [ "$current_branch" = "$b" ]; then
+      matched_branch="$b"
+      break
+    fi
+  done <<< "$protected_branches"
+fi
+
+# An in-progress cherry-pick is exempt. A repo whose publish line is an ORPHAN
+# (no shared ancestry with dev) cannot fast-forward; its sanctioned publish flow
+# is to cherry-pick dev's commits across, which does create commits on the
+# protected branch. CHERRY_PICK_HEAD exists only while git itself is replaying a
+# commit, so it cannot be reached by a hand-authored `git commit`.
+# Scope note: a clean `git cherry-pick` never runs this hook at all (git does not
+# invoke pre-commit when it replays a commit unattended); the hook is reached
+# only when you conclude a CONFLICTED cherry-pick with `git commit`, which is
+# exactly the case CHERRY_PICK_HEAD covers.
+# NOT covered: `git cherry-pick -n` followed by a separate `git commit`. Git
+# clears CHERRY_PICK_HEAD for --no-commit, leaving that path indistinguishable
+# from a hand-authored commit, so it is deliberately still blocked rather than
+# guessed at. Do that flow on a scratch branch and move the protected ref
+# afterwards (`git switch -c publish-sync <protected>` ... `git branch -f`).
+cherry_pick_in_progress=0
+if git rev-parse --verify --quiet CHERRY_PICK_HEAD >/dev/null 2>&1; then
+  cherry_pick_in_progress=1
+fi
+
+if [ -n "$matched_branch" ] && [ "$cherry_pick_in_progress" -eq 0 ]; then
+  echo "pre-commit: refusing a direct commit on protected branch '$matched_branch'." >&2
+  echo "  A protected branch only advances by fast-forward from your working branch:" >&2
+  echo "    git switch <working-branch>   # make your commits here" >&2
+  echo "    git switch $matched_branch && git merge --ff-only <working-branch>" >&2
+  echo "  A fast-forward creates no commit, so it passes this guard." >&2
+  echo "  Protected branches: $(echo "$protected_branches" | tr '\n' ' ')" >&2
+  echo "  (union of releasetrain.protectedbranch and publishguard.publishbranch)" >&2
+  echo "  Override once, intentionally: git commit --no-verify." >&2
+  exit 1
+fi
+
 # 0. Strict scanner (if present) — broadest net, runs first.
 if [ -x "$repo_root/scripts/publish-guard-strict-scan.sh" ]; then
   "$repo_root/scripts/publish-guard-strict-scan.sh"
@@ -40,6 +106,28 @@ while IFS= read -r f; do
       fail=1 ;;
   esac
 done <<< "$staged"
+
+# 1b. Absolute symlink targets. Git stores a symlink as its target path, so an
+#     absolute one bakes a machine path into the tree and dangles in every clone
+#     that does not reproduce the layout exactly. Unconditional rather than
+#     pattern-driven: this is a portability bug whether or not the path names a
+#     person, and the personal-pattern scan below cannot catch it anyway — that
+#     scan skips anything failing `-f`, which is every broken symlink.
+symlinks="$(git diff --cached --raw --diff-filter=ACMR | awk '$2 == "120000" {sub(/^[^\t]*\t/, ""); print}')"
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  # A rename shows src\tdst; the destination is what we are storing.
+  f="${f##*$'\t'}"
+  target="$(git show ":$f" 2>/dev/null || true)"
+  case "$target" in
+    /*)
+      echo "pre-commit: symlink '$f' points at an absolute path ('$target')." >&2
+      echo "  Git stores that path verbatim, so it leaks this machine's layout" >&2
+      echo "  and breaks in any clone. Re-point it relatively, e.g.:" >&2
+      echo "    ln -sfn ../<relative>/<path> '$f' && git add '$f'" >&2
+      fail=1 ;;
+  esac
+done <<< "$symlinks"
 
 # 2. Personal-pattern scan of staged content, skipping exempt (private-only)
 #    paths. Defaults cover common dev-only docs and the *.example configs.

@@ -13,6 +13,15 @@
 # Idempotency: rows whose description is already long (>= ALREADY_ENRICHED_LEN)
 #   are assumed to have been enriched and are skipped.  Re-running is safe.
 #
+# Crash-safe resume (staged recovery): each write is durable the moment
+#   execute_write returns (embedded LadybugDB auto-commits per statement). After
+#   every 50-entity batch the script records the processed entity IDs to a
+#   checkpoint file and fsyncs it — the explicit per-batch commit point. If the
+#   process dies mid-run, re-running loads the checkpoint and skips every
+#   already-processed ID, so no batch is re-fetched or re-written. The checkpoint
+#   is deleted on a clean finish, so a present checkpoint always means an earlier
+#   run did not complete.
+#
 # Progress: printed every 50 rows (Algorithm pass) and every 50 rows (Dataset pass),
 #   plus a heartbeat every ~10 seconds so the watchdog stays happy.
 #
@@ -20,7 +29,9 @@
 #   scripts/backfill-openml-descriptions.sh
 #
 # Environment:
-#   LADYBUG_DB_PATH   override default data/ladybug_db  (optional)
+#   LADYBUG_DB_PATH       override default data/ladybug_db  (optional)
+#   BACKFILL_CHECKPOINT   override the checkpoint file path  (optional;
+#                         default: <db-path>.backfill-checkpoint.json)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -29,7 +40,9 @@ echo ""
 
 python3 -u <<'PY'
 import asyncio
+import json
 import math
+import os
 import time
 
 import httpx
@@ -62,6 +75,46 @@ BATCH_SIZE = 50  # Process in batches; print progress at each batch boundary.
 
 reset_semaphore(CONCURRENCY)
 
+# ── Staged-recovery checkpoint ────────────────────────────────────────────────
+# One JSON file records the entity IDs already processed in each pass. It is
+# rewritten (and fsynced) at every batch boundary — the explicit per-batch
+# commit — and deleted only on a clean finish of both passes. A checkpoint that
+# is present on start therefore means a prior run crashed; its recorded IDs are
+# skipped so no batch is re-fetched or re-written.
+CHECKPOINT_PATH = os.environ.get("BACKFILL_CHECKPOINT") or (
+    str(cfg.ladybug_db_path) + ".backfill-checkpoint.json"
+)
+
+
+def _load_checkpoint() -> dict:
+    """Return the persisted progress, or an empty skeleton if none exists."""
+    try:
+        with open(CHECKPOINT_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (FileNotFoundError, ValueError):
+        return {"algorithm": [], "dataset": []}
+    data.setdefault("algorithm", [])
+    data.setdefault("dataset", [])
+    return data
+
+
+def _save_checkpoint(state: dict) -> None:
+    """Atomically persist progress and fsync — the explicit commit point."""
+    tmp = CHECKPOINT_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, CHECKPOINT_PATH)
+
+
+def _clear_checkpoint() -> None:
+    """Remove the checkpoint after a clean finish so the tree stays tidy."""
+    try:
+        os.remove(CHECKPOINT_PATH)
+    except FileNotFoundError:
+        pass
+
 
 def _safe_str(v) -> str:
     """Return v as str, or '' if it's nan / None."""
@@ -75,9 +128,15 @@ def _safe_str(v) -> str:
     return str(v)
 
 
-async def backfill_algorithms(db: GraphDB, client: httpx.AsyncClient) -> dict:
+async def backfill_algorithms(
+    db: GraphDB, client: httpx.AsyncClient, checkpoint: dict
+) -> dict:
     """Fetch OpenML flow descriptions and append to Algorithm descriptions."""
     print("── Algorithm pass ──")
+
+    done_ids = set(checkpoint["algorithm"])
+    if done_ids:
+        print(f"  Resuming: {len(done_ids)} Algorithm row(s) already checkpointed.")
 
     # Drop vector index first (LadybugDB constraint: can't SET indexed column).
     idx = _index_name("Algorithm")
@@ -102,20 +161,22 @@ async def backfill_algorithms(db: GraphDB, client: httpx.AsyncClient) -> dict:
     skipped_already_enriched = 0
     skipped_no_desc = 0
     skipped_errors = 0
+    skipped_checkpointed = 0
     start = time.time()
     last_print = start
 
     for batch_start in range(0, total, BATCH_SIZE):
         batch = rows[batch_start: batch_start + BATCH_SIZE]
 
-        # Fetch all flow descriptions in the batch concurrently.
-        flow_ids = [int(r["flow_id"]) for r in batch]
+        # Fetch descriptions only for rows not already committed by a prior run.
+        pending = [(r, int(r["flow_id"])) for r in batch if int(r["flow_id"]) not in done_ids]
+        skipped_checkpointed += len(batch) - len(pending)
         descs = await asyncio.gather(
-            *[fetch_flow_description_async(client, fid) for fid in flow_ids],
+            *[fetch_flow_description_async(client, fid) for _, fid in pending],
             return_exceptions=True,
         )
 
-        for row, fid, openml_desc in zip(batch, flow_ids, descs):
+        for (row, fid), openml_desc in zip(pending, descs):
             if isinstance(openml_desc, Exception):
                 logger_info = f"    flow {fid}: fetch raised {openml_desc}"
                 print(logger_info, flush=True)
@@ -127,10 +188,12 @@ async def backfill_algorithms(db: GraphDB, client: httpx.AsyncClient) -> dict:
             # Skip if already enriched (description is long enough).
             if len(existing_desc) >= ALREADY_ENRICHED_LEN:
                 skipped_already_enriched += 1
+                done_ids.add(fid)
                 continue
 
             if not openml_desc:
                 skipped_no_desc += 1
+                done_ids.add(fid)
                 continue
 
             new_desc = existing_desc + " " + openml_desc
@@ -139,6 +202,12 @@ async def backfill_algorithms(db: GraphDB, client: httpx.AsyncClient) -> dict:
                 {"flow_id": fid, "description": new_desc},
             )
             updated += 1
+            done_ids.add(fid)
+
+        # Explicit per-batch commit point: persist and fsync progress so a crash
+        # after this line never re-fetches or re-writes this batch on resume.
+        checkpoint["algorithm"] = sorted(done_ids)
+        _save_checkpoint(checkpoint)
 
         # Print progress at each batch boundary.
         now = time.time()
@@ -156,20 +225,28 @@ async def backfill_algorithms(db: GraphDB, client: httpx.AsyncClient) -> dict:
         f"{updated} updated, "
         f"{skipped_already_enriched} already enriched, "
         f"{skipped_no_desc} no OpenML desc, "
-        f"{skipped_errors} errors."
+        f"{skipped_errors} errors, "
+        f"{skipped_checkpointed} resumed-skip."
     )
     return {
         "updated": updated,
         "already_enriched": skipped_already_enriched,
         "no_desc": skipped_no_desc,
         "errors": skipped_errors,
+        "checkpointed": skipped_checkpointed,
         "total": total,
     }
 
 
-async def backfill_datasets(db: GraphDB, client: httpx.AsyncClient) -> dict:
+async def backfill_datasets(
+    db: GraphDB, client: httpx.AsyncClient, checkpoint: dict
+) -> dict:
     """Fetch OpenML dataset descriptions and append to Dataset descriptions."""
     print("\n── Dataset pass ──")
+
+    done_ids = set(checkpoint["dataset"])
+    if done_ids:
+        print(f"  Resuming: {len(done_ids)} Dataset row(s) already checkpointed.")
 
     idx = _index_name("Dataset")
     try:
@@ -193,18 +270,24 @@ async def backfill_datasets(db: GraphDB, client: httpx.AsyncClient) -> dict:
     skipped_already_enriched = 0
     skipped_no_desc = 0
     skipped_errors = 0
+    skipped_checkpointed = 0
     start = time.time()
 
     for batch_start in range(0, total, BATCH_SIZE):
         batch = rows[batch_start: batch_start + BATCH_SIZE]
 
-        dataset_ids = [int(r["dataset_id"]) for r in batch]
+        pending = [
+            (r, int(r["dataset_id"]))
+            for r in batch
+            if int(r["dataset_id"]) not in done_ids
+        ]
+        skipped_checkpointed += len(batch) - len(pending)
         descs = await asyncio.gather(
-            *[fetch_dataset_description_async(client, did) for did in dataset_ids],
+            *[fetch_dataset_description_async(client, did) for _, did in pending],
             return_exceptions=True,
         )
 
-        for row, did, openml_desc in zip(batch, dataset_ids, descs):
+        for (row, did), openml_desc in zip(pending, descs):
             if isinstance(openml_desc, Exception):
                 print(f"    dataset {did}: fetch raised {openml_desc}", flush=True)
                 skipped_errors += 1
@@ -214,10 +297,12 @@ async def backfill_datasets(db: GraphDB, client: httpx.AsyncClient) -> dict:
 
             if len(existing_desc) >= ALREADY_ENRICHED_LEN:
                 skipped_already_enriched += 1
+                done_ids.add(did)
                 continue
 
             if not openml_desc:
                 skipped_no_desc += 1
+                done_ids.add(did)
                 continue
 
             new_desc = existing_desc + " " + openml_desc
@@ -226,6 +311,11 @@ async def backfill_datasets(db: GraphDB, client: httpx.AsyncClient) -> dict:
                 {"dataset_id": did, "description": new_desc},
             )
             updated += 1
+            done_ids.add(did)
+
+        # Explicit per-batch commit point (see backfill_algorithms).
+        checkpoint["dataset"] = sorted(done_ids)
+        _save_checkpoint(checkpoint)
 
         processed_so_far = min(batch_start + BATCH_SIZE, total)
         elapsed = time.time() - start
@@ -240,13 +330,15 @@ async def backfill_datasets(db: GraphDB, client: httpx.AsyncClient) -> dict:
         f"{updated} updated, "
         f"{skipped_already_enriched} already enriched, "
         f"{skipped_no_desc} no OpenML desc, "
-        f"{skipped_errors} errors."
+        f"{skipped_errors} errors, "
+        f"{skipped_checkpointed} resumed-skip."
     )
     return {
         "updated": updated,
         "already_enriched": skipped_already_enriched,
         "no_desc": skipped_no_desc,
         "errors": skipped_errors,
+        "checkpointed": skipped_checkpointed,
         "total": total,
     }
 
@@ -289,6 +381,14 @@ async def main():
     # lets us fail fast and skip rather than stall.
     _client_timeout = httpx.Timeout(10.0, connect=5.0)
 
+    checkpoint = _load_checkpoint()
+    if checkpoint["algorithm"] or checkpoint["dataset"]:
+        print(
+            f"── Resuming from checkpoint {CHECKPOINT_PATH} "
+            f"({len(checkpoint['algorithm'])} algo / "
+            f"{len(checkpoint['dataset'])} dataset already done) ──\n"
+        )
+
     with GraphDB(cfg) as db:
         async with httpx.AsyncClient(timeout=_client_timeout) as client:
             # Print before samples
@@ -309,11 +409,15 @@ async def main():
                 print(f"    {c4_pre[0]['description']}")
             print()
 
-            algo_stats = await backfill_algorithms(db, client)
-            ds_stats = await backfill_datasets(db, client)
+            algo_stats = await backfill_algorithms(db, client, checkpoint)
+            ds_stats = await backfill_datasets(db, client, checkpoint)
 
             # Print after samples
             await print_before_after_samples(db, client)
+
+    # Both passes finished cleanly — drop the checkpoint so a later run starts
+    # fresh (a lingering checkpoint always signals an incomplete prior run).
+    _clear_checkpoint()
 
     wall = time.time() - t0
     total_api_calls = (

@@ -45,7 +45,7 @@ def test_embedding_model_default():
 
 def test_claude_model_default():
     cfg = Config()
-    assert cfg.claude_model == "claude-sonnet-4-6"
+    assert cfg.claude_model == "claude-sonnet-5"
 
 
 def test_eval_judge_model_default():

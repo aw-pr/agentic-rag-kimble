@@ -88,35 +88,52 @@ routine.
 
 ## Day-to-day
 
-Work on `dev` with atomic, per-agent-authored commits. Keep private artefacts
-(`HANDOFF.md`, `RUNBOOK.md`, `runs/`, `archive/`) out of the public surface — the
-publish step strips them, but the cleaner habit is to gitignore them on `dev`.
+Work on `dev` with atomic, per-agent-authored commits. Private artefacts
+(`HANDOFF.md`, `RUNBOOK.md`, `runs/`, `archive/`, and the Autometta runtime under
+`state/`) stay tracked on `dev`, so they follow clones and worktrees; the publish
+step strips them, and the `pre-push` private-file scan refuses any that slip
+through.
 
 Because `publish` is an orphan line, publish by cherry-picking `dev`'s new public
-commits onto it (no squash). The range is everything on `dev` not yet on
-`publish`:
+commits onto it (no squash). `scripts/publish-sync.sh` does this: it is a dry run
+by default, `--apply` acts, and it strips every path listed in
+`publishguard.privatefile` (one entry each: `HANDOFF.md`, `RUNBOOK.md`, `runs`,
+`archive`, `state`, `.publish-guard-strict.local.example`). Each replayed commit
+carries a `Publish-Sync-Source: <dev sha>` trailer, and the newest one on
+`publish` is the watermark the next run starts from. Commits published before
+2026-11-15 carry no trailer, so read the dry run's `base` line: if it is missing
+and the plan starts at the root commit, the watermark is absent and the plan is
+wrong for this mirror; do not `--apply` it.
+
+The same replay by hand, from the last published `dev` commit:
 
 ```bash
 git switch -c publish-sync publish
-for c in $(git rev-list --reverse <last-published-dev-commit>..dev); do
+for c in $(git rev-list --reverse --no-merges <last-published-dev-commit>..dev); do
   git cherry-pick -n "$c" || true
-  git rm -r --cached --ignore-unmatch runs archive RUNBOOK.md HANDOFF.md
+  git rm -r -f -q --ignore-unmatch runs archive state RUNBOOK.md HANDOFF.md \
+    .publish-guard-strict.local.example
   git diff --cached --quiet && continue        # drop private-only commits
-  git commit -C "$c"                           # preserve message + author
+  git commit -C "$c" --trailer "Publish-Sync-Source: $c"   # keep message + author
 done
 git diff --stat publish-sync <dev-tip>         # sanity: public-path trees match
-git branch -f publish publish-sync && git switch publish
-git push PUB publish                            # PR source; gh pr create --base main --head publish
-# review the PR diff (private-tier paths must be absent), then:
-PUBLISH_PR_REVIEWED=1 git publish               # PRIV publish, then ff PUB/main (completes the PR)
+git switch dev && git branch -f publish publish-sync && git branch -D publish-sync
+git push PRIV publish                           # private backup first
+git push PUB publish                            # PR source, private-file scanned
+gh pr create --base main --head publish         # read the diff, then merge on the forge
 ```
+
+Public `main` advances only by merging that PR on the forge. After the merge,
+fast-forward the local `publish` to `PUB/main` if the forge added a merge
+commit. Each cherry-pick onto an orphan base can conflict on files the seed
+curated differently; resolve toward `dev`'s version (`git checkout <c> -- <file>`),
+since `dev` is the source of truth for public content.
 
 `git publish` (alias, set by install-guards) =
 `git push PRIV PUBLISH_BRANCH && PUBLISH_GUARD_OK=1 git push PUB PUBLISH_BRANCH:main`.
-It backs up to the private remote first, then publishes. Each cherry-pick onto an
-orphan base can conflict on files the seed curated differently; resolve toward
-`dev`'s version (`git checkout <c> -- <file>`), since `dev` is the source of
-truth for public content.
+It backs up to the private remote first, then pushes public `main`. Under the
+default `publishguard.boundary=pr` that second push is refused (see below), so
+the alias only completes a publish in a repo that has opted into `direct`.
 
 ## The gate (why it can't be bypassed by accident)
 
@@ -127,13 +144,15 @@ truth for public content.
   (`publishguard.prsource`, default `publish`), which is allowed
   private-file-scanned so the publish→main PR can exist;
 - default branch to public → rejected **unless** the `PUBLISH_GUARD_OK=1`
-  sentinel is set, which only `git publish` does, **and**
-  `PUBLISH_PR_REVIEWED=1` attests the publish PR diff was reviewed
-  (`publishguard.boundary`, default `pr`; opt out per repo with
-  `git config publishguard.boundary direct`).
+  sentinel is set, which only `git publish` does, and even then rejected while
+  `publishguard.boundary` is `pr` (the default): the public default branch
+  advances by a reviewed merge on the forge, not by a push. There is no
+  environment-variable override; opt out per repo with
+  `git config publishguard.boundary direct`;
+- non-fast-forward to the public default branch → rejected, sentinel or not.
 
-So a hand-typed `git push PUB PUBLISH_BRANCH:main` is blocked and told to use
-`git publish` (which guarantees the private backup happened first). Deliberate
+So a hand-typed `git push PUB PUBLISH_BRANCH:main` is blocked and told to push
+the PR source and open a PR instead. Deliberate
 one-off override: `git push --no-verify`. Org/repo names live only in local
 `git config` — never in the committed tree, so this file stays publishable.
 

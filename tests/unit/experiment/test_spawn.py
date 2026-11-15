@@ -24,7 +24,7 @@ def base_task() -> Task:
         phase=0,
         tier="tier-1",
         worker_pref="sonnet",
-        verifier_pref="gpt-5.5",
+        verifier_pref="gpt-5.6-sol",
         state=TaskState.QUEUED,
     )
 

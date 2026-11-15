@@ -16,6 +16,19 @@
 #                              affects merge style upstream, surfaced in errors.
 #   publishguard.privatefile   (repeatable) path that must NEVER reach the
 #                              public tree. Default: HANDOFF.md
+#   publishguard.publishbranch Local branch that ff's onto public default.
+#                              Default: publish. Used here only as the default
+#                              source for publishguard.prsource below.
+#   publishguard.prsource      Branch allowed on the PUBLIC remote as a PR
+#                              source (publish → main PR-for-publish flow).
+#                              Default: value of publishguard.publishbranch.
+#   publishguard.boundary      pr (default) | direct. In pr mode the public
+#                              default branch may not be pushed at all: it
+#                              advances only by a merge performed on the forge,
+#                              where the diff is visible first. Push the
+#                              prsource branch and open a PR instead. direct
+#                              mode keeps the sentinel-only gate for repos that
+#                              opt out.
 #
 # On the public remote: only the default branch (main/master) may be pushed,
 # AND that push must arrive via the sanctioned path (sentinel env set) — i.e.
@@ -24,6 +37,16 @@
 # Non-fast-forward pushes to the public default branch are rejected even with
 # the sentinel set ("PUB/main is immutable"). A push whose tree still contains
 # a private file is rejected.
+#
+# The PR-source branch (publishguard.prsource) is also allowed on the public
+# remote — this is the "publish-pr" fast-forward-free path: push `publish` as
+# a non-default branch, then open a PR publish→main and review the diff before
+# merging on GitHub. It does NOT require the sentinel (it isn't the sanctioned
+# main-publish path — the PR review is the safeguard there) and is not subject
+# to the ff-only check (it's an ordinary branch, not the immutable public
+# default). It STILL runs the private-file tree scan: a privatefile leak on
+# the PR source must be rejected exactly like on main, fail-closed. Any other
+# non-default ref is still rejected.
 # Optional chain point: scripts/publish-guard-strict-scan.sh (runs if present).
 # Deliberate one-off override: git push --no-verify
 remote_name="$1"
@@ -34,7 +57,7 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 # Strict scanner — runs on every push, regardless of remote, if the repo ships
 # one. Catches personal positioning phrases before any push leaves the laptop.
 if [ -n "$repo_root" ] && [ -x "$repo_root/scripts/publish-guard-strict-scan.sh" ]; then
-  "$repo_root/scripts/publish-guard-strict-scan.sh"
+  "$repo_root/scripts/publish-guard-strict-scan.sh" || exit $?
 fi
 
 pub_match="$(git config --get publishguard.publicmatch || true)"
@@ -53,8 +76,42 @@ history_mode="$(git config --get publishguard.historymode || true)"
 private_files="$(git config --get-all publishguard.privatefile || true)"
 [ -z "$private_files" ] && private_files="HANDOFF.md"
 
+# PR-source branch for the publish-pr flow. Defaults to publishbranch (empty
+# publishbranch -> empty pr_source -> the case pattern below matches nothing,
+# so the PR path stays disabled rather than silently matching an odd ref).
+pr_source="$(git config --get publishguard.prsource || true)"
+if [ -z "$pr_source" ]; then
+  pr_source="$(git config --get publishguard.publishbranch || true)"
+fi
+
 # Zero SHA = ref deletion or initial push. Bash 3.2-compatible (no associative).
 zero="0000000000000000000000000000000000000000"
+
+# Reject the push if the tree being pushed contains a private file. Shared by
+# both the main-publish path and the PR-source path — fail-closed on both.
+check_privatefile() {
+  sha="$1"
+  ref="$2"
+  [ "$sha" = "$zero" ] && return 0
+  if ! git cat-file -e "${sha}^{tree}" 2>/dev/null; then
+    echo "pre-push: cannot read the tree pushed to PUBLIC '$ref' — blocked." >&2
+    return 1
+  fi
+  while IFS= read -r pf; do
+    [ -z "$pf" ] && continue
+    if ! private_matches="$(git --literal-pathspecs ls-tree -r --name-only "$sha" -- "${pf%/}" 2>/dev/null)"; then
+      echo "pre-push: cannot check private path '$pf' — blocked." >&2
+      return 1
+    fi
+    if [ -n "$private_matches" ]; then
+      echo "pre-push: private file '$pf' present in the tree pushed to" >&2
+      echo "          PUBLIC '$ref' — blocked. It is dev-only; keep it" >&2
+      echo "          out of the publish tree. Deliberate override: --no-verify." >&2
+      return 1
+    fi
+  done <<< "$private_files"
+  return 0
+}
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
@@ -65,6 +122,29 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         echo "pre-push: direct publish to PUBLIC remote '$remote_name' blocked." >&2
         echo "          Run 'git publish' — it backs up to the private remote" >&2
         echo "          first, then publishes. Deliberate override: --no-verify." >&2
+        exit 1
+      fi
+      # PR-for-publish boundary (default). The public default branch advances
+      # by a merge performed on the forge, never by this push.
+      #
+      # There is deliberately no environment-variable escape hatch. The old
+      # PUBLISH_PR_REVIEWED flag was an assertion by whoever was pushing, not a
+      # check on anything, and the recipe printed below used to end with it: so
+      # a PR was opened and completed by ff push seconds later, which makes the
+      # forge stamp it merged without a diff ever being read. Five consecutive
+      # publishes went out that way, each PR created and closed 11-17s apart
+      # with zero reviews. A gate that the gated party can open is not a gate.
+      boundary="$(git config --get publishguard.boundary || true)"
+      [ -z "$boundary" ] && boundary="pr"
+      if [ "$boundary" = "pr" ]; then
+        echo "pre-push: publish boundary is PR-by-default — the PUBLIC default" >&2
+        echo "          branch advances by a reviewed merge, not by this push:" >&2
+        echo "            1. git push $remote_name ${pr_source:-publish}   (PR source, scanned)" >&2
+        echo "            2. gh pr create --base ${remote_ref#refs/heads/} --head ${pr_source:-publish}" >&2
+        echo "            3. read the diff on the forge and merge it there." >&2
+        echo "          Protect the public default branch too, so the forge" >&2
+        echo "          rejects a direct push even if this hook is missing." >&2
+        echo "          Repo-level opt-out: git config publishguard.boundary direct" >&2
         exit 1
       fi
       # Block non-fast-forward to public default branch even with the sentinel.
@@ -81,18 +161,16 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         fi
       fi
       # Private files must not exist in the tree being published.
-      if [ "$local_sha" != "$zero" ]; then
-        pub_tree="$(git ls-tree -r --name-only "$local_sha" 2>/dev/null || true)"
-        while IFS= read -r pf; do
-          [ -z "$pf" ] && continue
-          if printf '%s\n' "$pub_tree" | grep -qx "$pf"; then
-            echo "pre-push: private file '$pf' present in the tree pushed to" >&2
-            echo "          PUBLIC '$remote_ref' — blocked. It is dev-only; keep it" >&2
-            echo "          out of the publish tree. Deliberate override: --no-verify." >&2
-            exit 1
-          fi
-        done <<< "$private_files"
-      fi
+      check_privatefile "$local_sha" "$remote_ref" || exit 1
+      ;;
+    refs/heads/"$pr_source")
+      # PR-for-publish source path: `publish` (or configured prsource) pushed
+      # as a non-default branch, then `gh pr create publish->main` for review.
+      # No sentinel required — this isn't the sanctioned main-publish path,
+      # the PR review is the safeguard here. No ff-only check — this is an
+      # ordinary branch, not the immutable public default. The private-file
+      # scan still runs, fail-closed, same as the main-publish path.
+      check_privatefile "$local_sha" "$remote_ref" || exit 1
       ;;
     *)
       echo "pre-push: '$remote_ref' blocked on PUBLIC remote '$remote_name'." >&2

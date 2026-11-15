@@ -55,7 +55,7 @@ def shell_spawn(
 
     `kind` is `worker` or `verifier`. The shell scripts live at
     `scripts/experiment-spawn-{kind}.sh` and own the per-family routing
-    (Sonnet vs Codex GPT-5.5). All the tick cares about is the pid and
+    (Sonnet vs GPT-5.6 Sol). All the tick cares about is the pid and
     where logs land.
     """
     if kind not in {"worker", "verifier"}:

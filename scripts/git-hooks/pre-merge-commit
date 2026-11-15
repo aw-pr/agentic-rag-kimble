@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Publish guard — pre-merge-commit. Extends the pre-commit guard to merges.
+#
+# CANONICAL SOURCE: mcp-hub/templates/git-hooks/pre-merge-commit.
+# Do NOT edit the per-repo copy under scripts/git-hooks/ — edit this template
+# and re-sync, then re-arm each repo with scripts/install-guards.sh.
+#
+# Git does NOT run pre-commit when the commit being created is a merge commit;
+# it runs this hook instead. Without it, `git merge --no-ff dev` onto the
+# publish branch sails past the protected-branch guard — which is the more
+# likely slip than a direct commit, since it is what `git merge dev` does when
+# --ff-only is forgotten.
+#
+# Delegating to pre-commit (git's own sample does the same) keeps one source of
+# truth for the guard, and re-scanning the merge result is a real safety net: a
+# merge can carry content into a branch that never passed the guard on that
+# branch, e.g. a long-lived branch created before the hooks were armed.
+#
+# A fast-forward merge creates no commit, so this hook never fires for it —
+# the sanctioned `git merge --ff-only <working-branch>` flow is unaffected.
+# Deliberate one-off override: git merge --no-verify.
+set -euo pipefail
+
+hook="$(git rev-parse --git-path hooks/pre-commit)"
+[ -x "$hook" ] || exit 0
+
+# Not exec: on rejection git leaves the merge applied to the index and worktree
+# ("Not committing merge; use 'git commit' to complete the merge"), which is
+# confusing on a branch you were just told not to commit to. Point at the exit.
+if ! "$hook"; then
+  echo "pre-merge-commit: merge rejected, but it is still staged in your" >&2
+  echo "  worktree. Back it out with:  git merge --abort" >&2
+  exit 1
+fi
+exit 0

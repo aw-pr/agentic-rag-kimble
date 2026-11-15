@@ -39,7 +39,7 @@ def _task(**kw) -> Task:
         phase=0,
         tier="T2",
         worker_pref="sonnet",
-        verifier_pref="gpt-5.5",
+        verifier_pref="gpt-5.6-sol",
     )
     defaults.update(kw)
     return Task(**defaults)

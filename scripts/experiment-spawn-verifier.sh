@@ -5,7 +5,7 @@
 #
 # Reads $workdir/brief.md, parses the optional YAML frontmatter for a
 # `model:` key, and dispatches to the correct LLM CLI:
-#   gpt-5.5 → codex exec --model gpt-5.5  (default — cross-family inverse)
+#   gpt-5.6-sol → codex exec --model gpt-5.6-sol  (default — cross-family inverse)
 #   sonnet  → claude -p --model sonnet --output-format text
 #
 # The verifier is instructed to read $workdir/diff.patch and $workdir/log,
@@ -42,9 +42,9 @@ if [ ! -f "$BRIEF" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Parse frontmatter model (default: gpt-5.5 for verifier — cross-family inverse)
+# Parse frontmatter model (default: gpt-5.6-sol for verifier — cross-family inverse)
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL="gpt-5.5"
+DEFAULT_MODEL="gpt-5.6-sol"
 
 parse_model() {
   # Extract `model:` value from YAML frontmatter (between opening --- and
@@ -91,7 +91,7 @@ BRIEF_BODY="$(awk '
 #   `.result`, and writes $RESULT itself. This bypasses the Write tool,
 #   which sonnet-as-verifier was unreliable at invoking (pass-29 bug X).
 #
-# - gpt-5.5 path: codex exec runs the verifier with workspace-write,
+# - gpt-5.6-sol path: codex exec runs the verifier with workspace-write,
 #   so it writes $RESULT directly. The file-write instruction stays.
 VERIFIER_PREAMBLE="
 ---
@@ -223,14 +223,14 @@ print(json.dumps(obj))
       fi
     fi
     ;;
-  gpt-5.5)
+  gpt-5.6-sol)
     # --sandbox workspace-write: codex defaults to read-only, which blocks
     # the verifier from writing $RESULT (the one thing this script needs).
     # workspace-write scopes writes to the current working directory only.
-    codex exec --model gpt-5.5 --sandbox workspace-write "$PROMPT" || MODEL_EXIT=$?
+    codex exec --model gpt-5.6-sol --sandbox workspace-write "$PROMPT" || MODEL_EXIT=$?
     ;;
   *)
-    echo "experiment-spawn-verifier: ERROR — unknown model '$MODEL' (supported: sonnet, gpt-5.5)" >&2
+    echo "experiment-spawn-verifier: ERROR — unknown model '$MODEL' (supported: sonnet, gpt-5.6-sol)" >&2
     exit 1
     ;;
 esac

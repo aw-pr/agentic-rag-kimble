@@ -87,9 +87,13 @@ OpenML API
     |  Kimball snowflake      <- Run(fact) + dimensions + AlgorithmFamily outrigger
     v
 [Agent layer]              src/agent/
-    |  orchestrator.py        <- Claude Agent SDK via OAuth session
-    |  tools.py               <- graph_query / semantic_search / aggregate_measures
-    |  prompts.py             <- system prompt, tool descriptions
+    |  orchestrator.py        <- Claude Agent SDK via OAuth session; @tool registration
+    |  prompts.py             <- system prompt
+    |  cost_log.py            <- per-query JSONL cost/telemetry line
+    v
+[Retrieval layer]          src/retrieval/
+    |  tools.py               <- dispatch_tool: routes the agent's tool calls
+    |  graph_tool.py, semantic_tool.py, aggregate_tool.py  <- the three tool implementations
     v
 [Eval harness]             src/eval/
     |  judge.py               <- LLM-as-judge scoring
@@ -110,7 +114,7 @@ graph_query(cypher: str, explain: str) -> list[dict]
 
 semantic_search(
     query: str,
-    entity_type: Literal["Algorithm", "Dataset", "Task", "AlgorithmFamily"],
+    entity_type: Literal["Algorithm", "Dataset", "Task"],
     top_k: int = 10
 ) -> list[dict]
 
@@ -122,6 +126,10 @@ aggregate_measures(
 ```
 
 Three canonical tools: `graph_query`, `semantic_search`, `aggregate_measures`.
+
+`AlgorithmFamily` descriptions are embedded and carry their own HNSW index, but
+`semantic_search` does not accept it as an `entity_type` yet; family questions
+go through `aggregate_measures(group_by="algorithm.family", ...)` or Cypher.
 
 ---
 
