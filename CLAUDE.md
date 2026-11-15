@@ -19,21 +19,24 @@ Full architecture: `docs/architecture.md`. Full spec: `docs/spec.md`.
 
 - Claude auth route: Claude Agent SDK OAuth (Max subscription quota, no API billing). Auth is automatic via the Claude Code CLI session — no env vars, no API key, no op-fetch required.
 - No `.env` files. No hardcoded keys anywhere. The previous `run-secure-query.sh` thin alias and `op-refs.sh` 1Password pointer file were removed in pass-29 as vestigial; the orchestrator is invoked directly via `python -m src.agent.orchestrator`.
-- **Three guards, two hooks**: `scripts/git-hooks/pre-commit` (armed by `scripts/install-guards.sh`) enforces, in order:
-  1. The strict scanner — `scripts/publish-guard-strict-scan.sh`, scans the entire working tree (tracked + untracked, gitignore-aware) against the strict pattern list (`.publish-guard-strict.local`). No path exemptions. Block on hit.
-  2. The publish guard — never-commit files (`.env`, `*.local`, etc.) plus a path-aware personal-pattern scan reading the gitignored `.publish-guard.local`. Exempts `runs/`, `archive/`, `HANDOFF.md`, `RUNBOOK.md`, `LICENSE` (private-tier, excluded from publish squash).
-  3. The leak guard — `scripts/check-secrets.sh`, chained at the end (auth/op-fetch leak patterns).
-- `scripts/git-hooks/pre-push` also runs the strict scanner before allowing a push to the public remote.
+- **Four hooks** under `scripts/git-hooks/`, armed by `scripts/install-guards.sh`. `pre-commit` enforces, in order:
+  1. The protected-branch guard: refuses a direct commit on `publish` (or any branch named in `releasetrain.protectedbranch` / `publishguard.publishbranch`); an in-progress cherry-pick is exempt.
+  2. The strict scanner: `scripts/publish-guard-strict-scan.sh`, scans the entire working tree (tracked + untracked, gitignore-aware) against the strict pattern list (`.publish-guard-strict.local`). No path exemptions. Block on hit.
+  3. The publish guard: never-commit files (`.env`, `*.local`, etc.), symlinks with absolute targets, and a path-aware personal-pattern scan reading the gitignored `.publish-guard.local`. Exempts `runs/`, `archive/`, `HANDOFF.md`, `RUNBOOK.md`, `CLEANUP-PROMPT.md` (private-tier, stripped from the public mirror), `LICENSE` (carries the author's name by design) and the two `*.example` pattern files.
+  4. The leak guard: `scripts/check-secrets.sh`, chained at the end (auth/op-fetch leak patterns).
+- `pre-merge-commit` applies the protected-branch guard to merge commits, which skip `pre-commit`.
+- `pre-push` runs the strict scanner on every push and fails closed on the public remote: only `publish` may go there, as the PR source, and a push to public `main` is refused (`publishguard.boundary` defaults to `pr`), so public `main` advances only by merging that PR on the forge.
+- `commit-msg` appends a vendor `Co-Authored-By` trailer to agent-authored commits (cosmetic, not a guard).
 - `scripts/check-secrets.sh` and `scripts/publish-guard-strict-scan.sh` both run as steps of `scripts/smoke-test.sh`, so leak/strict protection is enforced even without the git hooks (which are not cloned).
 
 ### Forbidden phrases (block-on-sight)
 
 Never write personal positioning copy anywhere in this repo — comments, docstrings, prompts, prose, anywhere. This applies to Claude and Codex equally.
 
-The authoritative list is in `.publish-guard-strict.local.example` (tracked, see file). It covers categories like personal-status taxonomy, application-process language, and rate-card terms. The strict scanner blocks commits and pushes if any pattern appears in a publishable path. If you need to refer to the *category* in prose, say "personal positioning copy" or "personal-pattern scan".
+The authoritative list is in `.publish-guard-strict.local.example` (tracked in the private working repo; kept off the public mirror). It covers categories like personal-status taxonomy, application-process language, and rate-card terms. The strict scanner blocks commits and pushes if any pattern appears in a publishable path. If you need to refer to the *category* in prose, say "personal positioning copy" or "personal-pattern scan".
 
-Private-tier paths (`runs/`, `archive/`, `HANDOFF.md`, `RUNBOOK.md`, `LICENSE`) are exempt because they never reach the public mirror — the publish workflow squash drops them.
-- **Publish workflow** is set up but inert: see `docs/PUBLISH-WORKFLOW.md`. Five `publishguard.*` git-config keys are set (intended public org configured locally; no org or repo name is written into the tracked tree, per the skill's discipline); no public remote is added yet. Publishing only happens via `git publish` (which routes through the fail-closed `pre-push`).
+Private-tier paths (`runs/`, `archive/`, `HANDOFF.md`, `RUNBOOK.md`) are exempt because they never reach the public mirror: the publish replay strips them from every commit.
+- **Publish workflow** is live: see `docs/PUBLISH-WORKFLOW.md`. The public mirror is a separate remote named only in local `publishguard.*` git config (no org or repo name is written into the tracked tree). `publish` is an orphan line advanced by atomic cherry-pick of `dev`'s public commits; public `main` moves only by merging a reviewed PR from `publish` on the forge.
 
 ## Kimball schema
 
