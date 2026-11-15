@@ -14,7 +14,7 @@
 ## What it does
 
 - Queries 171,250 OpenML experimental runs using a LadybugDB property graph (Cypher) and native HNSW vector index — single embedded store, no separate vector database. 
-- Applies Ralph Kimball's dimensional modelling to the knowledge graph: `Run` is the fact node; `Algorithm`, `Dataset`, `Task`, and a conformed `Date` are dimension nodes with vector-embedded descriptions; `AlgorithmFamily` is a snowflaked outrigger sub-dimension off `Algorithm`
+- Applies Ralph Kimball's dimensional modelling to the knowledge graph: `Run` is the fact node; `Algorithm`, `Dataset`, and `Task` are dimension nodes with vector-embedded descriptions, alongside a conformed `Date` dimension; `AlgorithmFamily` is a snowflaked outrigger sub-dimension off `Algorithm`
 - Routes each user query to the appropriate retrieval strategy -- structured lookup, semantic similarity, or aggregate analysis -- via a Claude Agent SDK orchestrator (OAuth via Claude Code session; costs charge against Max subscription quota, no API billing)
 - Scores retrieval quality offline via a 20-fixture recall harness; response quality is scored live by a `claude-haiku-4-5` LLM judge sampled at 5 fixtures per run
 
@@ -47,7 +47,7 @@ flowchart LR
 
 LadybugDB is the community continuation of Kùzu following Apple's acqui-hire in early 2025. All three agent tools -- graph query, semantic search, and aggregate measures -- operate against a single embedded LadybugDB instance. The `VECTOR` extension provides the native HNSW index on dimension-node descriptions; ChromaDB is not used.
 
-> For the design discussion behind these choices — how this scales, how the dimensional model copes with drift, how the project compares with flat RAG and long-context approaches, and where the wider RAG market is heading — see `[docs/discussion.md](docs/discussion.md)`.
+> For the design discussion behind these choices — how this scales, how the dimensional model copes with drift, how the project compares with flat RAG and long-context approaches, and where the wider RAG market is heading — see [docs/discussion.md](docs/discussion.md).
 
 ---
 
@@ -209,11 +209,11 @@ Build provenance: per-pass retrospectives are in `runs/build-log/`.
 
 **Recall ceiling context.** recall@10 = 0.950 on the 20-fixture set (pass 28). Fixtures rebuilt from scratch against the actual corpus; no broadening. The single remaining failure is a description-vocabulary gap for `HistGradientBoostingClassifier`. See `runs/build-log/pass-28-snowflake-and-green-gate.md`.
 
-**OpenML backfill segfault (FU2).** The overnight backfill segfaulted (`rc=139`) on 14 May; root cause is still unisolated. Mitigated, not fixed: staged runs with per-stage backups and explicit commits, so a crash leaves the corpus consistent. See `runs/build-log/pass-26-recovery-note.md`.
+**OpenML backfill segfault (FU2).** The overnight backfill segfaulted (`rc=139`) on 14 May. Six escalating repro attempts in pass 30, up to a full-scale backfill against a copy of the store, did not reproduce it, so no root cause is claimed; the most likely trigger is a stale LadybugDB write-ahead log left by an earlier force-killed run. Mitigated, not fixed: description writes now bind `$description` as a parameter instead of interpolating it into Cypher, and `scripts/backfill-openml-descriptions.sh` checkpoints after every 50-entity batch, so a crashed run resumes without re-fetching or re-writing committed batches. See `runs/build-log/pass-30-fu2-note.md`.
 
 **Judge grounding below target.** The grounding rule lifted the sampled grounding score from 2.4 to 3.00 (pass 28), short of the 3.5+ target. Closing that gap is the main open response-quality follow-up.
 
-**Ingestion time.** The full 500-dataset async ingest takes approximately 90 minutes on an M-series MacBook. Use `--max-datasets 50` for a faster smoke corpus during development.
+**Ingestion time.** The full 500-dataset async ingest takes approximately 90 minutes on an M-series MacBook. For a faster smoke corpus during development, run the loader directly with `python3 -m src.ingestion.loader_async --max-datasets 50` (`scripts/ingest.sh` does not pass extra flags through).
 
 ---
 
