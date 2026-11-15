@@ -239,4 +239,5 @@ MIT. See `LICENSE`.
 
 | Version | Date | Summary |
 |---|--:|---|
+| v0.3.1 | 2026-11-15 | Agent default model to `claude-sonnet-5`; experiment workers to GPT-5.6 Sol; checkpointed, resumable OpenML description backfill; publish guards (protected `publish` branch, PR-only public boundary, `scripts/publish-sync.sh`); docs corrected against the code. |
 | v0.3.0 | 2026-06-08 | Snowflaked `AlgorithmFamily` outrigger, Kùzu→LadybugDB rename, OpenML description binding (FU2), and cost/telemetry reporting. |
