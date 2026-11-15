@@ -62,19 +62,20 @@ Three tools only, registered via `@tool` decorator in the Claude Agent SDK. Do n
 
 ## Agent passes
 
-Build history (passes 01-21) staged in `archive/agent-prompts/` and `runs/build-log/`. Originals kept as a provenance trail; not live instructions.
+Build history (passes 01-21) staged in `archive/agent-prompts/` and `runs/build-log/` (private working repo only; not on the public mirror). Originals kept as a provenance trail; not live instructions.
 
 | Pass | File | Builds |
 |---|---|---|
 | 01 | agent-01-scaffold.md | Repo scaffold, requirements, .gitignore |
 | 02 | agent-02-schema.md | Kùzu schema + migration |
 | 03 | agent-03-ingestion.md | OpenML fetch + transform + load |
-| 04 | agent-04-semantic.md | ChromaDB + embedding pipeline |
-| 05 | agent-05-tools.md | Three agent tools + tests |
-| 06 | agent-06-orchestrator.md | Claude orchestrator + auth |
-| 07 | agent-07-eval.md | Eval harness + LLM judge |
+| 04 | agent-04-eval-harness.md | Eval harness + LLM judge (built early as the signal) |
+| 05 | agent-05-semantic.md | ChromaDB + embedding pipeline |
+| 06 | agent-06-tools.md | Three agent tools + tests |
+| 07 | agent-07-orchestrator.md | Claude orchestrator + auth |
 | 08 | agent-08-ui.md | Streamlit UI |
-| 09 | agent-09-readme.md | Public README + Mermaid diagram |
+| 09 | agent-09-eval-integration.md | Eval suite integrated with the live agent |
+| 10 | agent-10-readme.md | Public README + Mermaid diagram |
 
 Check `git log --oneline` to see which passes have completed before resuming.
 
