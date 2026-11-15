@@ -65,8 +65,8 @@ task from chewing through its attempts in seconds.
 
 ## Daily flow
 
-1. Author a task brief in `runs/experiment/tasks/<id>/brief.md`. Frontmatter optional (`model: sonnet` or `model: gpt-5.5` to override the default).
-2. Append a task entry to `runs/experiment/state.yaml` (see section C of the plan for the schema). State `queued`. `worker_pref` defaults to `sonnet`; `verifier_pref` to `gpt-5.5` (the cross-family inverse).
+1. Author a task brief in `runs/experiment/tasks/<id>/brief.md`. Frontmatter optional (`model: sonnet` or `model: gpt-5.6-sol` to override the default; the spawn scripts reject any other value).
+2. Append a task entry to `runs/experiment/state.yaml` (see section C of the plan for the schema). State `queued`. `worker_pref` defaults to `sonnet`; `verifier_pref` to `gpt-5.6-sol` (the cross-family inverse).
 3. Within five minutes the tick spawns the worker. The Mayor shows it move to `running`.
 4. When the worker exits with `acceptance: pass`, the tick preserves the worker verdict as `result.worker.json` and spawns the cross-family verifier; the Mayor shows the task move to `verifying`. If the worker reports `acceptance: fail`, the task goes to `stalled` and retry/block logic applies.
 5. When the verifier writes its own `result.json` with `acceptance: pass`, the next tick promotes the task to `done`. A verifier rejection sends the task back to `queued` (attempts++) or to `blocked` with `blocked_reason: verifier-rejected-twice`.
@@ -154,7 +154,7 @@ tmux has-session -t mayor 2>/dev/null && echo "mayor is up" || echo "mayor not r
 ## Relationship to the rest of the repo
 
 - The leak guard (`scripts/check-secrets.sh`) and publish guard (`scripts/git-hooks/pre-commit`) run on every commit the tick makes, exactly like every commit you make by hand. A worker that tries to introduce a leaky pattern is blocked the same way you would be.
-- The smoke-test (`scripts/smoke-test.sh`) is the binding gate for all scaffold code. Phase 0 tests live under `tests/unit/experiment/` and join the existing 420 unit tests.
+- The smoke-test (`scripts/smoke-test.sh`) is the binding gate for all scaffold code. Phase 0 tests live under `tests/unit/experiment/` and run as part of the unit suite.
 - The experiment is part of, not separate from, the project repo. There is no separate fork or sandbox. Each task commits into `pass-29` with author attribution naming the model that did the work.
 
 ## When you're done with the experiment
