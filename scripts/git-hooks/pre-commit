@@ -7,24 +7,46 @@
 # and re-sync (mcp-hub/scripts/sync-all-platforms.sh), then re-arm each repo
 # with scripts/install-guards.sh.
 #
+# Every check reads the INDEX, never the worktree: the staged set is read
+# NUL-delimited (so no file name is quoted or split), type changes are in it,
+# and a file staged and then deleted from the worktree is still scanned.
+#
 # Personal patterns are read from a gitignored .publish-guard.local (one ERE
-# regex per line; seeded from .publish-guard.local.example).
+# regex per line; seeded from .publish-guard.local.example). A pattern grep
+# cannot compile refuses the commit: a broken pattern would otherwise match
+# nothing and let everything through.
 # Private-only paths are exempt from the personal-pattern scan (a tracked file
 # kept off the public mirror may legitimately contain personal data). Defaults
 # below; extend per repo via `git config --add publishguard.exemptpath '<glob>'`.
+# Exempt globs are matched with `case`, never expanded against the worktree,
+# and `*` also matches `/`, so `runs/*` covers `runs/2026-11-15/retro.md`.
 # Optional chain points (run if the repo ships them):
 #   scripts/publish-guard-strict-scan.sh   strict positioning-phrase scan
 #   scripts/check-secrets.sh               auth/secret leak guard
-# Override once, intentionally: git commit --no-verify
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 
-# 0a. Protected-branch guard. A protected branch must only ever advance by
-#     `git merge --ff-only <working-branch>`. A fast-forward creates no commit,
-#     so this hook never fires for it; a direct commit here is exactly how the
-#     dev and publish lines diverge, so refuse it. Do the work on your working
-#     branch and fast-forward the protected branch onto it.
+# in_list NEEDLE LIST: LIST holds one branch name per line.
+in_list() {
+  local item
+  while IFS= read -r item; do
+    [ -n "$item" ] && [ "$item" = "$1" ] && return 0
+  done <<EOF
+$2
+EOF
+  return 1
+}
+
+# 0a. Protected-branch guard. A protected branch takes no new work of its own.
+#     The sanctioned flow is `git merge --ff-only <working-branch>`: a
+#     fast-forward creates no commit, so this hook never fires for it. A direct
+#     commit here is exactly how the dev and publish lines diverge, so refuse it.
+#     Do the work on your working branch and fast-forward the protected branch
+#     onto it. The rule the guard enforces is containment, applied by the
+#     companion reference-transaction hook: a protected ref may move to any
+#     commit another allowed branch or a remote already holds, including back
+#     or across, but never to a commit nothing else holds.
 #     Two orthogonal keys name protected branches and this guard refuses a
 #     direct commit on the UNION of both. They differ only in what a *push*
 #     means, which is git-push-check's problem, not this hook's:
@@ -33,57 +55,53 @@ repo_root="$(git rev-parse --show-toplevel)"
 #     Either key may be set as many times as you need. With neither configured
 #     the default is the single branch `publish`.
 #     Non-ff MERGE commits do not reach this hook — git runs pre-merge-commit
-#     for those, and the companion template delegates back here. Both must be
-#     installed for the branch to be genuinely protected.
-#     Override once, intentionally: git commit --no-verify.
-protected_branches="$(
-  { git config --get-all releasetrain.protectedbranch || true
-    git config --get-all publishguard.publishbranch  || true
-  } | sed '/^[[:space:]]*$/d' | sort -u
-)"
-[ -n "$protected_branches" ] || protected_branches="publish"
+#     for those, and the companion template delegates back here. Commits this
+#     hook never sees (cherry-pick, revert, rebase, am, `commit --no-verify`)
+#     are refused by the companion reference-transaction hook, which judges
+#     the ref move itself. All three must be armed for the branch to be
+#     genuinely protected.
+#     Override once, deliberately: PROTECTED_BRANCH_OK=1 git commit ...
+#     (--no-verify skips this hook but not reference-transaction).
+release_branches="$(git config --get-all releasetrain.protectedbranch 2>/dev/null | sed '/^[[:space:]]*$/d' || true)"
+publish_branches="$(git config --get-all publishguard.publishbranch 2>/dev/null | sed '/^[[:space:]]*$/d' || true)"
+if [ -z "$release_branches" ] && [ -z "$publish_branches" ]; then
+  publish_branches="publish"
+fi
+protected_branches="$(printf '%s\n%s\n' "$release_branches" "$publish_branches" | sed '/^[[:space:]]*$/d' | sort -u)"
 current_branch="$(git symbolic-ref --quiet --short HEAD || true)"
 
-matched_branch=""
-if [ -n "$current_branch" ]; then
-  while IFS= read -r b; do
-    [ -z "$b" ] && continue
-    if [ "$current_branch" = "$b" ]; then
-      matched_branch="$b"
-      break
-    fi
-  done <<< "$protected_branches"
-fi
-
-# An in-progress cherry-pick is exempt. A repo whose publish line is an ORPHAN
-# (no shared ancestry with dev) cannot fast-forward; its sanctioned publish flow
-# is to cherry-pick dev's commits across, which does create commits on the
-# protected branch. CHERRY_PICK_HEAD exists only while git itself is replaying a
-# commit, so it cannot be reached by a hand-authored `git commit`.
+# An in-progress cherry-pick is exempt on a PUBLISH branch only. A repo whose
+# publish line is an ORPHAN (no shared ancestry with dev) cannot fast-forward;
+# its sanctioned publish flow is to cherry-pick dev's commits across, which does
+# create commits there. CHERRY_PICK_HEAD exists only while git itself is
+# replaying a commit, so it cannot be reached by a hand-authored `git commit`.
+# A branch listed only in releasetrain.protectedbranch gets no exemption: a
+# release trunk advances by fast-forward or PR, never by a cherry-pick.
 # Scope note: a clean `git cherry-pick` never runs this hook at all (git does not
-# invoke pre-commit when it replays a commit unattended); the hook is reached
-# only when you conclude a CONFLICTED cherry-pick with `git commit`, which is
-# exactly the case CHERRY_PICK_HEAD covers.
+# invoke pre-commit when it replays a commit unattended); reference-transaction
+# applies the same publish-only exemption to it. This hook is reached only when
+# you conclude a CONFLICTED cherry-pick with `git commit`.
 # NOT covered: `git cherry-pick -n` followed by a separate `git commit`. Git
 # clears CHERRY_PICK_HEAD for --no-commit, leaving that path indistinguishable
 # from a hand-authored commit, so it is deliberately still blocked rather than
 # guessed at. Do that flow on a scratch branch and move the protected ref
 # afterwards (`git switch -c publish-sync <protected>` ... `git branch -f`).
-cherry_pick_in_progress=0
-if git rev-parse --verify --quiet CHERRY_PICK_HEAD >/dev/null 2>&1; then
-  cherry_pick_in_progress=1
-fi
-
-if [ -n "$matched_branch" ] && [ "$cherry_pick_in_progress" -eq 0 ]; then
-  echo "pre-commit: refusing a direct commit on protected branch '$matched_branch'." >&2
-  echo "  A protected branch only advances by fast-forward from your working branch:" >&2
-  echo "    git switch <working-branch>   # make your commits here" >&2
-  echo "    git switch $matched_branch && git merge --ff-only <working-branch>" >&2
-  echo "  A fast-forward creates no commit, so it passes this guard." >&2
-  echo "  Protected branches: $(echo "$protected_branches" | tr '\n' ' ')" >&2
-  echo "  (union of releasetrain.protectedbranch and publishguard.publishbranch)" >&2
-  echo "  Override once, intentionally: git commit --no-verify." >&2
-  exit 1
+if [ "${PROTECTED_BRANCH_OK:-}" != "1" ] && [ -n "$current_branch" ] \
+   && in_list "$current_branch" "$protected_branches"; then
+  if in_list "$current_branch" "$publish_branches" \
+     && git rev-parse --verify --quiet CHERRY_PICK_HEAD >/dev/null 2>&1; then
+    :
+  else
+    echo "pre-commit: refusing a direct commit on protected branch '$current_branch'." >&2
+    echo "  A protected branch only advances by fast-forward from your working branch:" >&2
+    echo "    git switch <working-branch>   # make your commits here" >&2
+    echo "    git switch $current_branch && git merge --ff-only <working-branch>" >&2
+    echo "  A fast-forward creates no commit, so it passes this guard." >&2
+    echo "  Protected branches: $(printf '%s' "$protected_branches" | tr '\n' ' ')" >&2
+    echo "  (union of releasetrain.protectedbranch and publishguard.publishbranch)" >&2
+    echo "  Override once, deliberately: PROTECTED_BRANCH_OK=1 git commit ..." >&2
+    exit 1
+  fi
 fi
 
 # 0. Strict scanner (if present) — broadest net, runs first.
@@ -91,34 +109,49 @@ if [ -x "$repo_root/scripts/publish-guard-strict-scan.sh" ]; then
   "$repo_root/scripts/publish-guard-strict-scan.sh"
 fi
 
-staged="$(git diff --cached --name-only --diff-filter=ACMR)"
-[ -z "$staged" ] && exit 0
+work="$(mktemp -d "${TMPDIR:-/tmp}/pre-commit.XXXXXX")"
+trap 'rm -rf "$work"' EXIT
+
+# The staged set, once, NUL-delimited. T (type change) is in the filter so a
+# file that becomes a symlink, or a symlink that becomes a file, is checked.
+git diff --cached -z --name-only --diff-filter=ACMRT >"$work/staged"
+staged=()
+while IFS= read -r -d '' f; do
+  staged+=("$f")
+done <"$work/staged"
+[ "${#staged[@]}" -eq 0 ] && exit 0
 
 fail=0
 
+# index_mode PATH: the staged mode of PATH (e.g. 100644, 120000, 160000).
+index_mode() {
+  local entry=""
+  IFS= read -r -d '' entry < <(git --literal-pathspecs ls-files --stage -z -- "$1") || true
+  printf '%s' "${entry%% *}"
+}
+
 # 1. Never-commit files (regardless of .gitignore state).
-while IFS= read -r f; do
-  [ -z "$f" ] && continue
+for f in "${staged[@]}"; do
   case "$f" in
     .env.example|*.local.example) continue ;;
     .env|.env.*|*/.env|*.local|op-refs.local.sh|*settings.local.json|state.json|jobs|*/auth.json|*.log)
       echo "pre-commit: refusing to commit '$f' (machine-specific / secret)." >&2
       fail=1 ;;
   esac
-done <<< "$staged"
+done
 
 # 1b. Absolute symlink targets. Git stores a symlink as its target path, so an
 #     absolute one bakes a machine path into the tree and dangles in every clone
 #     that does not reproduce the layout exactly. Unconditional rather than
 #     pattern-driven: this is a portability bug whether or not the path names a
-#     person, and the personal-pattern scan below cannot catch it anyway — that
-#     scan skips anything failing `-f`, which is every broken symlink.
-symlinks="$(git diff --cached --raw --diff-filter=ACMR | awk '$2 == "120000" {sub(/^[^\t]*\t/, ""); print}')"
-while IFS= read -r f; do
-  [ -z "$f" ] && continue
-  # A rename shows src\tdst; the destination is what we are storing.
-  f="${f##*$'\t'}"
-  target="$(git show ":$f" 2>/dev/null || true)"
+#     person. Whether a path is a symlink, and its target, come from the index
+#     (the staged mode and blob), never from the worktree.
+modes=()
+for f in "${staged[@]}"; do
+  mode="$(index_mode "$f")"
+  modes+=("$mode")
+  [ "$mode" = "120000" ] || continue
+  target="$(git cat-file blob ":0:$f" 2>/dev/null || true)"
   case "$target" in
     /*)
       echo "pre-commit: symlink '$f' points at an absolute path ('$target')." >&2
@@ -127,35 +160,85 @@ while IFS= read -r f; do
       echo "    ln -sfn ../<relative>/<path> '$f' && git add '$f'" >&2
       fail=1 ;;
   esac
-done <<< "$symlinks"
+done
 
-# 2. Personal-pattern scan of staged content, skipping exempt (private-only)
+# 2. Personal-pattern scan of staged blobs, skipping exempt (private-only)
 #    paths. Defaults cover common dev-only docs and the *.example configs.
-default_exempt="HANDOFF.md RUNBOOK.md LICENSE CLEANUP-PROMPT.md runs/* archive/* .publish-guard.local.example .publish-guard-strict.local.example"
-extra_exempt="$(git config --get-all publishguard.exemptpath 2>/dev/null | tr '\n' ' ' || true)"
-exempt="$default_exempt $extra_exempt"
+#    One glob per line; never word-split or pathname-expanded.
+exempt="$(
+  printf '%s\n' HANDOFF.md RUNBOOK.md LICENSE CLEANUP-PROMPT.md 'runs/*' 'archive/*' \
+    .publish-guard.local.example .publish-guard-strict.local.example
+  git config --get-all publishguard.exemptpath 2>/dev/null || true
+)"
+
+is_exempt() {
+  local g
+  while IFS= read -r g; do
+    [ -z "$g" ] && continue
+    # shellcheck disable=SC2254
+    case "$1" in $g) return 0 ;; esac
+  done <<EOF
+$exempt
+EOF
+  return 1
+}
 
 local_cfg="$repo_root/.publish-guard.local"
 if [ -f "$local_cfg" ]; then
-  patterns="$(grep -vE '^[[:space:]]*(#|$)' "$local_cfg" || true)"
+  rc=0
+  patterns="$(grep -vE '^[[:space:]]*(#|$)' "$local_cfg")" || rc=$?
+  if [ "$rc" -gt 1 ]; then
+    echo "pre-commit: cannot read $local_cfg (grep exit $rc)." >&2
+    exit 1
+  fi
+
+  # Patterns fail closed: one grep cannot compile would match nothing.
+  bad=0
+  while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    rc=0
+    grep -E -- "$pat" </dev/null >/dev/null 2>&1 || rc=$?
+    if [ "$rc" -gt 1 ]; then
+      echo "pre-commit: invalid pattern in .publish-guard.local: $pat" >&2
+      bad=1
+    fi
+  done <<EOF
+$patterns
+EOF
+  if [ "$bad" -ne 0 ]; then
+    echo "pre-commit: blocked. Fix the pattern(s) above; an invalid pattern scans nothing." >&2
+    exit 1
+  fi
+
   if [ -n "$patterns" ]; then
-    while IFS= read -r f; do
-      [ -z "$f" ] && continue
-      [ -f "$repo_root/$f" ] || continue
-      skip=0
-      for g in $exempt; do
-        # shellcheck disable=SC2254
-        case "$f" in $g) skip=1; break ;; esac
-      done
-      [ "$skip" -eq 1 ] && continue
+    i=0
+    for f in "${staged[@]}"; do
+      mode="${modes[$i]}"
+      i=$((i + 1))
+      # A submodule entry records a commit of another repo; there is no blob here.
+      [ "$mode" = "160000" ] && continue
+      is_exempt "$f" && continue
+      if ! git cat-file -e ":0:$f" 2>/dev/null \
+         || ! git cat-file blob ":0:$f" >"$work/blob" 2>/dev/null; then
+        echo "pre-commit: cannot read the staged content of '$f'; refusing to commit it unscanned." >&2
+        fail=1
+        continue
+      fi
       while IFS= read -r pat; do
         [ -z "$pat" ] && continue
-        if git show ":$f" 2>/dev/null | grep -nE -- "$pat" >/dev/null 2>&1; then
+        rc=0
+        grep -qE -- "$pat" "$work/blob" 2>/dev/null || rc=$?
+        if [ "$rc" -eq 0 ]; then
           echo "pre-commit: '$f' contains a personal pattern (/$pat/)." >&2
           fail=1
+        elif [ "$rc" -gt 1 ]; then
+          echo "pre-commit: scanning '$f' for /$pat/ failed (grep exit $rc)." >&2
+          fail=1
         fi
-      done <<< "$patterns"
-    done <<< "$staged"
+      done <<EOF
+$patterns
+EOF
+    done
   fi
 fi
 

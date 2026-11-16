@@ -112,7 +112,7 @@ while IFS= read -r probe; do
   trailer="$(vendor_trailer_for "$probe")" || continue
   addr="${trailer#*<}"; addr="${addr%>}"
 
-  if grep -qiF -- "$addr" "$msg_file"; then
+  if grep -i '^co-authored-by:' "$msg_file" | grep -qiF -- "$addr"; then
     # Collapse every trailer bearing this address onto the canonical spelling,
     # keeping the first occurrence's position.
     awk -v addr="$addr" -v canon="Co-Authored-By: $trailer" '
