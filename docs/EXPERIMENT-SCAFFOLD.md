@@ -40,7 +40,7 @@ If you close the Mayor, the cron keeps ticking. If you remove the cron, the Mayo
 |---|---|
 | `runs/experiment/state.yaml` | The queue. Every task as a YAML entry, current state. Source of truth. |
 | `runs/experiment/budget.yaml` | Pacing knobs (parallel cap, stall window, daily spawn threshold). Edits take effect on next tick. |
-| `runs/experiment/budget.yaml.example` | Committed default; copy to `budget.yaml` to override. |
+| `config/experiment/budget.yaml.example` | Committed default; copy to `budget.yaml` to override. |
 | `runs/experiment/events.log` | One-line tick markers + per-transition log. Append-only. |
 | `runs/experiment/tasks/<id>/` | Per-task workdir: `brief.md` (input), `log` (worker/verifier output), `result.worker.json` (worker verdict, preserved on worker-pass), `result.json` (final verifier verdict on `done` tasks), `diff.patch` (proposed changes). |
 | `runs/experiment/PAUSE` | Sentinel: tick stops spawning; in-flight workers finish. |

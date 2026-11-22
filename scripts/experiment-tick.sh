@@ -30,7 +30,7 @@ mkdir -p "$EXP_DIR"
 
 # Cold-start safety: missing files are normal on first run.
 [ -f "$STATE" ] || : > "$STATE"
-[ -f "$BUDGET" ] || cp "$EXP_DIR/budget.yaml.example" "$BUDGET" 2>/dev/null || true
+[ -f "$BUDGET" ] || cp config/experiment/budget.yaml.example "$BUDGET" 2>/dev/null || true
 
 ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 echo "$ts tick" >> "$EVENTS"
