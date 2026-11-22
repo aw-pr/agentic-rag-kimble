@@ -42,7 +42,7 @@ EXP_DIR = REPO_ROOT / "runs" / "experiment"
 STATE_YAML = EXP_DIR / "state.yaml"
 EVENTS_LOG = EXP_DIR / "events.log"
 BUDGET_YAML = EXP_DIR / "budget.yaml"
-BUDGET_EXAMPLE = EXP_DIR / "budget.yaml.example"
+BUDGET_EXAMPLE = REPO_ROOT / "config" / "experiment" / "budget.yaml.example"
 TRIAGE_DIR = EXP_DIR / "triage"
 
 # Ensure src package is importable when run as a script.

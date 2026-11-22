@@ -1,4 +1,4 @@
-# Experiment scaffold — operator manual
+# Experiment scaffold: operator manual
 
 The runbook for actually using the long-running experiment scaffold. The
 *plan* lives in `docs/EXPERIMENT-PLAN.md`; this file is the steady-state
@@ -40,7 +40,7 @@ If you close the Mayor, the cron keeps ticking. If you remove the cron, the Mayo
 |---|---|
 | `runs/experiment/state.yaml` | The queue. Every task as a YAML entry, current state. Source of truth. |
 | `runs/experiment/budget.yaml` | Pacing knobs (parallel cap, stall window, daily spawn threshold). Edits take effect on next tick. |
-| `runs/experiment/budget.yaml.example` | Committed default; copy to `budget.yaml` to override. |
+| `config/experiment/budget.yaml.example` | Committed default; copy to `budget.yaml` to override. |
 | `runs/experiment/events.log` | One-line tick markers + per-transition log. Append-only. |
 | `runs/experiment/tasks/<id>/` | Per-task workdir: `brief.md` (input), `log` (worker/verifier output), `result.worker.json` (worker verdict, preserved on worker-pass), `result.json` (final verifier verdict on `done` tasks), `diff.patch` (proposed changes). |
 | `runs/experiment/PAUSE` | Sentinel: tick stops spawning; in-flight workers finish. |
@@ -56,11 +56,11 @@ If you close the Mayor, the cron keeps ticking. If you remove the cron, the Mayo
 | `verifying` | Worker passed acceptance; cross-family verifier spawned to independently confirm. Worker's result preserved at `result.worker.json`; verifier writes `result.json`. | `done`, `queued` (verifier rejected, retry budget left), `blocked` (verifier rejected twice), `stalled` |
 | `stalled` | The pid is gone or the log has not been touched within the stall window. Applies to both worker and verifier rounds. | `queued` (retry budget left) or `blocked` |
 | `blocked` | Out of retries, or verifier rejected twice (`blocked_reason: verifier-rejected-twice`). Needs triage. | `queued` (re-spec) or `failed` (abort), set by an explicit triage task. |
-| `done` | Verifier independently returned PASS. Terminal. | — |
-| `failed` | Triage aborted, or hard error in tick (e.g. verifier-spawn-error). Terminal. | — |
+| `done` | Verifier independently returned PASS. Terminal. | n/a |
+| `failed` | Triage aborted, or hard error in tick (e.g. verifier-spawn-error). Terminal. | n/a |
 
 A task that stalls and retries within a single tick **does not respawn that
-tick** — natural one-heartbeat cooldown. This prevents a chronically broken
+tick**, a natural one-heartbeat cooldown. This prevents a chronically broken
 task from chewing through its attempts in seconds.
 
 ## Daily flow
@@ -70,7 +70,7 @@ task from chewing through its attempts in seconds.
 3. Within five minutes the tick spawns the worker. The Mayor shows it move to `running`.
 4. When the worker exits with `acceptance: pass`, the tick preserves the worker verdict as `result.worker.json` and spawns the cross-family verifier; the Mayor shows the task move to `verifying`. If the worker reports `acceptance: fail`, the task goes to `stalled` and retry/block logic applies.
 5. When the verifier writes its own `result.json` with `acceptance: pass`, the next tick promotes the task to `done`. A verifier rejection sends the task back to `queued` (attempts++) or to `blocked` with `blocked_reason: verifier-rejected-twice`.
-6. The tick commits the worker's `diff.patch` on `done`, with per-agent author attribution and a `Verified-By: <verifier model>` trailer. *(Commit wiring is not yet implemented — see the pass-29 build-log for the open follow-up.)*
+6. The tick commits the worker's `diff.patch` on `done`, with per-agent author attribution and a `Verified-By: <verifier model>` trailer.
 
 ## Control commands (in the Mayor's bottom pane)
 
@@ -88,7 +88,7 @@ task from chewing through its attempts in seconds.
 | `help` | List commands. |
 | `quit` | Leave the control shell. The tmux session stays up. |
 
-## How to stop it — pick the right severity
+## How to stop it: pick the right severity
 
 | Need | Use |
 |---|---|
@@ -107,7 +107,7 @@ Three soft brakes / visibility lines, all configurable in `budget.yaml`:
 | `phase_overspend_multiplier` | A phase's LLM-active time > N × expected | Mayor warning + heartbeat pauses spawning for that phase until you `ack-overspend <phase>`. |
 | `daily_spawn_threshold` | Rolling 24h spawn count > N | Mayor warning. No automatic action. Visibility only. |
 
-None of these cap money — the auth routes are subscription (Claude Max +
+None of these cap money: the auth routes are subscription (Claude Max +
 ChatGPT), so the cost knob is quota throttling, not billing. The guards
 exist to catch *task-level* runaways, not budget compliance.
 
@@ -117,9 +117,9 @@ When a task lands in `blocked`:
 
 1. The Mayor shows it in the blocked count. `show <task>` and `brief <task>` to read the context.
 2. Decide one of three things:
-   - **Re-spec** — the brief was wrong. Edit `brief.md`, then `requeue <task>` to send it back to queued. Attempts reset.
-   - **Abort** — the task isn't recoverable. Manually edit state.yaml to set state to `failed` with a `blocked_reason` line.
-   - **Escalate** — a higher-tier reasoning task should look at it. Enqueue a triage task (`tier: T1`, `worker_pref: opus`) that depends on the blocked one and outputs a decision.
+   - **Re-spec**: the brief was wrong. Edit `brief.md`, then `requeue <task>` to send it back to queued. Attempts reset.
+   - **Abort**: the task isn't recoverable. Manually edit state.yaml to set state to `failed` with a `blocked_reason` line.
+   - **Escalate**: a higher-tier reasoning task should look at it. Enqueue a triage task (`tier: T1`, `worker_pref: gpt-5.6-sol`) that depends on the blocked one and outputs a decision.
 3. Triage decisions land in `runs/experiment/triage/<timestamp>.md` for the dashboard's "last triage decision" panel.
 
 ## Recovery from a crash
@@ -146,7 +146,7 @@ tmux has-session -t mayor 2>/dev/null && echo "mayor is up" || echo "mayor not r
 ## What the scaffold deliberately does NOT do
 
 - It does **not** auto-create triage tasks. The tick marks `blocked` and stops there. Triage is an explicit, operator-or-Opus decision.
-- It does **not** push to any remote. Commits land on `pass-29` only.
+- It does **not** push to any remote. Commits land on the current branch only.
 - It does **not** modify `main` or `dev`.
 - It does **not** require any API key. Auth is subscription-only on both Claude and Codex.
 - It does **not** persist across machine reboots automatically. Cron does (it lives in your user crontab). The Mayor doesn't (tmux doesn't survive reboot); re-launch with `./scripts/experiment-mayor.sh`.
@@ -155,7 +155,7 @@ tmux has-session -t mayor 2>/dev/null && echo "mayor is up" || echo "mayor not r
 
 - The leak guard (`scripts/check-secrets.sh`) and publish guard (`scripts/git-hooks/pre-commit`) run on every commit the tick makes, exactly like every commit you make by hand. A worker that tries to introduce a leaky pattern is blocked the same way you would be.
 - The smoke-test (`scripts/smoke-test.sh`) is the binding gate for all scaffold code. Phase 0 tests live under `tests/unit/experiment/` and run as part of the unit suite.
-- The experiment is part of, not separate from, the project repo. There is no separate fork or sandbox. Each task commits into `pass-29` with author attribution naming the model that did the work.
+- The experiment is part of, not separate from, the project repo. There is no separate fork or sandbox. Each task commits into the current branch with author attribution naming the model that did the work.
 
 ## When you're done with the experiment
 

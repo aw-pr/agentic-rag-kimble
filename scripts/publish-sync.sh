@@ -22,8 +22,23 @@
 #
 # Usage:
 #   scripts/publish-sync.sh [--apply] [--source dev] [--target publish]
-#                           [--scratch publish-sync] [--repo <dir>]
-#                           [--on-conflict abort|skip|theirs]
+#                           [--base <rev>] [--scratch publish-sync]
+#                           [--repo <dir>] [--on-conflict abort|skip|theirs]
+#
+# The replay range is <base>..<source>, and the base has to be one the script
+# can prove. In order of precedence:
+#   --base <rev>  named by you; must be an ancestor of the source.
+#   watermark     the last Publish-Sync-Source trailer value of the newest
+#                 target commit that carries one; must name a commit that is
+#                 an ancestor of the source.
+#   the target    only when no target commit carries the trailer AND the
+#                 target is an ancestor of the source (a linear publish line).
+# Anything else is refused with exit 1 before anything is written, in a dry run
+# too: an orphan or hand-diverged target with no watermark, a watermark that is
+# not a commit here or not an ancestor of the source, a --base that is not an
+# ancestor of the source. The refusal prints `suggested --base <sha>`, the
+# newest source commit whose tree, private paths aside, equals the target's,
+# when there is one. Check it, then pass it as --base.
 #
 # --on-conflict picks the curation policy when a replayed commit does not apply:
 #   abort  (default) stop and change nothing; resolve by hand.
@@ -32,7 +47,8 @@
 #          which cancel out. The tree comparison at the end is what proves
 #          nothing of substance was lost.
 #   theirs take the SOURCE branch's version of every conflicted file. Right when
-#          the source is the sole authority for public content.
+#          the source is the sole authority for public content. It settles
+#          conflicts inside a proven range; it does not stand in for --base.
 #
 # Exit codes: 0 ok / nothing to do, 1 refused, failed, or the final check found
 # drift or a private path on the target (the ref has moved; inspect it), 2 bad
@@ -42,6 +58,7 @@ set -euo pipefail
 apply=0
 source_branch="dev"
 target_branch=""
+base_arg=""
 scratch_branch="publish-sync"
 repo_dir=""
 resolve="abort"
@@ -51,6 +68,12 @@ while [ $# -gt 0 ]; do
     --apply) apply=1 ;;
     --source) shift; source_branch="${1:-}" ;;
     --target) shift; target_branch="${1:-}" ;;
+    --base)
+      case "${2:-}" in
+        ""|-*) echo "publish-sync: --base needs a commit: --base <rev>" >&2; exit 2 ;;
+      esac
+      shift; base_arg="$1"
+      ;;
     --scratch) shift; scratch_branch="${1:-}" ;;
     --repo) shift; repo_dir="${1:-}" ;;
     --on-conflict)
@@ -60,7 +83,7 @@ while [ $# -gt 0 ]; do
         *) echo "publish-sync: --on-conflict accepts abort|skip|theirs" >&2; exit 2 ;;
       esac
       ;;
-    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR > 1 { if (/^#/) print; else exit }' "$0"; exit 0 ;;
     *) echo "publish-sync: unknown arg '$1'" >&2; exit 2 ;;
   esac
   shift
@@ -98,10 +121,28 @@ $private_paths
 EOF
 )"
 
+# The private set as arguments: plain paths for a history scan, and the
+# pathspec that selects everything else for a tree comparison.
+private_args=()
+public_spec=(.)
+while IFS= read -r p; do
+  [ -z "$p" ] && continue
+  private_args+=("$p")
+  public_spec+=(":(exclude)$p")
+done <<EOF
+$private_paths
+EOF
+
 for b in "$source_branch" "$target_branch"; do
   git rev-parse --verify --quiet "refs/heads/$b" >/dev/null \
     || { echo "publish-sync: branch '$b' does not exist" >&2; exit 1; }
 done
+
+explicit_base=""
+if [ -n "$base_arg" ]; then
+  explicit_base="$(git rev-parse --verify --quiet "$base_arg^{commit}")" \
+    || { echo "publish-sync: --base '$base_arg' does not name a commit in this repository" >&2; exit 2; }
+fi
 
 # Is $1 inside the private set (exact path or a directory prefix of it)?
 is_private() {
@@ -143,32 +184,121 @@ commit_is_private_only() {
 # Where the last replay stopped. A replayed commit is a new SHA, so once the
 # target has diverged, target..source would name every commit since the fork
 # for ever, and re-applying an old change over a newer one conflicts. Each
-# replayed commit therefore carries a Publish-Sync-Source trailer naming the
-# source commit it came from; the newest one on the target is the watermark.
-# No trailer means the lines have not diverged through this script yet, and
-# the target itself is the right base.
-# Drain the log so a large history cannot SIGPIPE git under pipefail.
-watermark="$(git log "$target_branch" --format='%(trailers:key=Publish-Sync-Source,valueonly)' \
-  | awk 'NF && !found { print $1; found=1 }')"
-base="$target_branch"
-if [ -n "$watermark" ]; then
-  if git rev-parse --verify --quiet "$watermark^{commit}" >/dev/null; then
-    base="$watermark"
+# replayed commit therefore carries one Publish-Sync-Source trailer naming the
+# source commit it came from. The watermark is the LAST value on the newest
+# target commit that carries the key: a commit written before the replay
+# stripped copied trailers can hold an older value ahead of its own.
+# One line per target commit, "<sha> TAB <trailer> TAB <trailer>...", read to
+# the end so a large history cannot SIGPIPE git under pipefail.
+wm_line="$(git log --no-show-signature "$target_branch" \
+    --format='%H%x09%(trailers:key=Publish-Sync-Source,unfold,separator=%x09)' \
+  | awk -F '\t' '!found && $2 != "" {
+      found = 1; v = $NF; sub(/^[^:]*:[ \t]*/, "", v); split(v, word, /[ \t]+/)
+      print $1 " " word[1]
+    }')"
+wm_carrier="${wm_line%% *}"
+watermark="${wm_line#* }"
+wm_base=""
+[ -z "$wm_carrier" ] || wm_base="$(git rev-parse --verify --quiet "$watermark^{commit}" || true)"
+
+# The base must be provable, because <base>..<source> is replayed as it stands
+# and everything in it becomes public history. A base that is not an ancestor
+# of the source proves nothing: the range then reaches back to the fork, or to
+# the root when the lines share no history, and republishes commits the target
+# already has in another form or was built to leave out. So an unprovable base
+# is a refusal, never a fallback to the target. Without a watermark the target
+# is its own proof only when it is an ancestor of the source.
+base=""
+base_from=""
+refusal=""
+refusal_detail=""
+if [ -n "$explicit_base" ]; then
+  if git merge-base --is-ancestor "$explicit_base" "$source_branch"; then
+    base="$explicit_base"
+    base_from="--base"
+    if [ -n "$wm_base" ] && [ "$wm_base" != "$explicit_base" ] \
+       && git merge-base --is-ancestor "$wm_base" "$source_branch"; then
+      base_from="--base, in place of the watermark $(git rev-parse --short "$wm_base")"
+    fi
   else
-    echo "publish-sync: WARNING: watermark $watermark from $target_branch is not a commit here; replaying from $target_branch." >&2
+    refusal="--base $(git rev-parse --short "$explicit_base") is not an ancestor of $source_branch"
+    refusal_detail="The replay is what $source_branch gained after the base, so only one of $source_branch's own commits can be it."
   fi
+elif [ -n "$wm_carrier" ]; then
+  wm_named="Publish-Sync-Source: $(printf '%.40s' "$watermark") (on $(git rev-parse --short "$wm_carrier"))"
+  if [ -z "$watermark" ]; then
+    refusal="the watermark on $target_branch has no value"
+    refusal_detail="$(git rev-parse --short "$wm_carrier") is the newest $target_branch commit with a Publish-Sync-Source trailer, and its last one is empty."
+  elif [ -z "$wm_base" ]; then
+    refusal="the watermark on $target_branch is not a commit in this repository"
+    refusal_detail="$wm_named was recorded in another clone, or $source_branch was rewritten and the commit is gone."
+  elif ! git merge-base --is-ancestor "$wm_base" "$source_branch"; then
+    refusal="the watermark on $target_branch is not an ancestor of $source_branch"
+    refusal_detail="$wm_named names a commit $source_branch no longer contains, so $source_branch was rewritten since the last replay."
+  else
+    base="$wm_base"
+    base_from="watermark from the last replay"
+  fi
+elif git merge-base --is-ancestor "$target_branch" "$source_branch"; then
+  base="$target_branch"
+else
+  refusal="$target_branch carries no Publish-Sync-Source watermark and is not an ancestor of $source_branch"
+  refusal_detail="On an orphan or hand-diverged line, $target_branch..$source_branch is every $source_branch commit since the root or the fork, published or not."
 fi
+
+# The newest source commit whose tree, private paths aside, equals the
+# target's: the point the target is provably level with, so a replay from it
+# adds exactly what the source gained since. Read-only. One diff-tree walks the
+# source's history, comparing each commit with the target as though the target
+# were its parent; a commit with no ':' diff line under its header matches. A
+# scan that fails suggests nothing.
+suggest_base() {
+  _level="$(git rev-parse "$target_branch^{commit}")"
+  _match="$(git rev-list "$source_branch" | sed "s/\$/ $_level/" \
+    | git diff-tree --stdin --always -r -- "${public_spec[@]}" \
+    | awk '
+        /^:/ { differs = 1; next }
+        { if (candidate != "" && !differs && match_sha == "") match_sha = candidate
+          candidate = $1; differs = 0 }
+        END { if (candidate != "" && !differs && match_sha == "") match_sha = candidate
+              if (match_sha != "") print match_sha }')" || _match=""
+  printf '%s' "$_match"
+}
+
+# Exit 1 with the reason, and with the base to pass when one can be proved.
+# Runs before the plan, so the dry run refuses exactly as --apply does.
+refuse() {
+  echo "publish-sync: refused: $refusal." >&2
+  echo "  $refusal_detail" >&2
+  echo "  Nothing was planned or written. Name the base with --base <rev>." >&2
+  _suggested="$(suggest_base)"
+  if [ -n "$_suggested" ]; then
+    echo "publish-sync: suggested --base $_suggested  ($(git log -1 --no-show-signature --date=short --format='%s, %ad' "$_suggested"))" >&2
+    echo "  Its tree, private paths aside, is identical to $target_branch's, so a replay from it adds" >&2
+    echo "  only what $source_branch gained since. Check that is where $target_branch stands, then re-run with it." >&2
+  else
+    echo "publish-sync: no $source_branch commit has $target_branch's tree once the private paths are set aside, so no base is suggested." >&2
+    echo "  Pass the $source_branch commit $target_branch was last level with as --base <rev>; the tree" >&2
+    echo "  comparison at the end of the run reports whatever still differs." >&2
+  fi
+  exit 1
+}
+
+echo "publish-sync: repo    $(pwd)"
+echo "publish-sync: source  $source_branch ($(git rev-parse --short "$source_branch"))"
+echo "publish-sync: target  $target_branch ($(git rev-parse --short "$target_branch"))"
+private_line="publish-sync: private $(printf '%s' "$private_paths" | tr '\n' ' ')"
+if [ -n "$refusal" ]; then
+  echo "$private_line"
+  refuse
+fi
+[ -z "$base_from" ] || echo "publish-sync: base    $(git rev-parse --short "$base") ($base_from)"
+echo "$private_line"
 
 # Merge commits are not replayed: a merge carries no changes of its own that a
 # linear public line needs, and the tree comparison at the end proves nothing
 # was lost. If that check reports a difference, resolve it by hand.
 commits="$(git rev-list --reverse --no-merges "$base..$source_branch" || true)"
-
-echo "publish-sync: repo    $(pwd)"
-echo "publish-sync: source  $source_branch ($(git rev-parse --short "$source_branch"))"
-echo "publish-sync: target  $target_branch ($(git rev-parse --short "$target_branch"))"
-[ "$base" = "$target_branch" ] || echo "publish-sync: base    $(git rev-parse --short "$base") (watermark from the last replay)"
-echo "publish-sync: private $(printf '%s' "$private_paths" | tr '\n' ' ')"
 
 # Private paths already tracked on $1, one per line. A leak that predates this
 # run is still a leak: the pre-push guard will refuse the next publish, so say
@@ -220,13 +350,18 @@ echo "publish-sync: $plan_replay to replay, $plan_skip private-only to drop"
 
 # Replaying rewrites every SHA, which turns a target that was an ancestor of
 # the source into a diverged line for good. That price is only worth paying
-# when something actually has to be stripped. When no commit in the range
-# touches a private path, the target is still an ancestor, and it carries no
-# leak, the ref simply fast-forwards and the linear model is kept.
+# when something actually has to be stripped. When the target is still an
+# ancestor, it carries no leak, and no commit the ref would cross touches a
+# private path, the ref simply fast-forwards and the linear model is kept.
+# The scan covers target..source, not the replay range: the ref crosses every
+# commit in it, wherever the base sits. --full-history keeps a merged side
+# branch that added and removed a private path in view, and the paths are
+# taken literally in one call. A scan that fails means replay.
 mode="replay"
 if git merge-base --is-ancestor "$target_branch" "$source_branch" \
    && [ -z "$leak" ] \
-   && [ -z "$(printf '%s\n' "$private_paths" | xargs -I{} git rev-list -n 1 "$base..$source_branch" -- {})" ]; then
+   && private_touch="$(git --literal-pathspecs rev-list --full-history -n 1 "$target_branch..$source_branch" -- "${private_args[@]}")" \
+   && [ -z "$private_touch" ]; then
   mode="fast-forward"
 fi
 echo "publish-sync: mode $mode"
@@ -272,7 +407,7 @@ target_before="$(git rev-parse "$target_branch")"
 # moved on the success path, so an abort leaves it exactly where it was.
 finished=0
 on_exit() {
-  rm -f "${pick_err:-}"
+  rm -f "${pick_err:-}" "${msg_file:-}"
   [ "$finished" -eq 1 ] && return 0
   echo "publish-sync: aborting, restoring $start_branch" >&2
   git cherry-pick --abort >/dev/null 2>&1 || true
@@ -284,6 +419,7 @@ on_exit() {
 }
 trap 'on_exit' EXIT
 pick_err="$(mktemp)"
+msg_file="$(mktemp)"
 
 replayed=0
 skipped=0
@@ -354,11 +490,25 @@ EOF
     continue
   fi
 
-  # -C preserves the original author, date and message; only the committer
-  # moves, plus the one trailer that records where this commit came from. The
-  # attribution hook is skipped so it cannot rewrite the message, and stdin is
-  # closed so a hook that reads it cannot eat the rest of the commit list.
-  SKIP_AGENT_TRAILER=1 git commit --quiet -C "$c" --trailer "Publish-Sync-Source: $c" </dev/null
+  # Author, author date and message are the source commit's; only the committer
+  # moves. The message loses any Publish-Sync-Source line it already carries
+  # (copied back from the target, or pasted) and gains the one trailer that
+  # records where this commit came from, so the next run reads a single value.
+  # The attribution hook is skipped so it cannot rewrite the message, and stdin
+  # is closed so a hook that reads it cannot eat the rest of the commit list.
+  git log -1 --no-show-signature --format=%B "$c" \
+    | awk 'tolower($0) !~ /^publish-sync-source[ \t]*:/' > "$msg_file"
+  GIT_AUTHOR_NAME="$(git log -1 --no-show-signature --format=%an "$c")" \
+  GIT_AUTHOR_EMAIL="$(git log -1 --no-show-signature --format=%ae "$c")" \
+  GIT_AUTHOR_DATE="@$(git log -1 --no-show-signature --date=raw --format=%ad "$c")" \
+  SKIP_AGENT_TRAILER=1 \
+    git commit --quiet -F "$msg_file" --trailer "Publish-Sync-Source: $c" </dev/null
+  recorded="$(git log -1 --no-show-signature --format='%(trailers:key=Publish-Sync-Source,valueonly)' HEAD | sed '/^$/d')"
+  if [ "$recorded" != "$c" ]; then
+    echo "publish-sync: the replay of $(git log -1 --format='%h %s' "$c") does not carry exactly one Publish-Sync-Source trailer naming it." >&2
+    echo "  The next run could not resume from it. Check the trailer.* git config and any commit-msg hook." >&2
+    exit 1
+  fi
   echo "  replay  $(git log -1 --format='%h %s' HEAD)"
   replayed=$((replayed + 1))
 done <<EOF
@@ -408,7 +558,35 @@ else
   echo "publish-sync: verified: no private path on $target_branch."
 fi
 
-if [ -n "$drift" ] || [ -n "$leak" ]; then
+# Every commit the target gained in this run, whatever the mode, must lack the
+# private paths in its tree: a path added and later removed would otherwise
+# reach public history with a clean tip. Commits the target already had are
+# not judged again. A scan that cannot run counts as a leak.
+history_leak=""
+gained=""
+if [ "${#private_args[@]}" -gt 0 ] && ! gained="$(git rev-list "$target_before..$target_branch")"; then
+  history_leak="(cannot list $target_before..$target_branch)"
+fi
+while IFS= read -r c; do
+  [ -z "$c" ] && continue
+  if ! found="$(git -c core.quotePath=false --literal-pathspecs ls-tree -r --name-only "$c" -- "${private_args[@]}")"; then
+    history_leak="(cannot read $c)"
+    break
+  fi
+  if [ -n "$found" ]; then
+    history_leak="$(git log -1 --format='%h %s' "$c"): $(printf '%s' "$found" | tr '\n' ' ')"
+    break
+  fi
+done <<EOF
+$gained
+EOF
+if [ -n "$history_leak" ]; then
+  echo "publish-sync: WARNING: a commit $target_branch gained in this run carries a private path: $history_leak" >&2
+else
+  echo "publish-sync: verified: no private path in any commit $target_branch gained."
+fi
+
+if [ -n "$drift" ] || [ -n "$leak" ] || [ -n "$history_leak" ]; then
   echo "publish-sync: verification failed; $target_branch has moved but must not be published as is." >&2
   exit 1
 fi

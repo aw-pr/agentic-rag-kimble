@@ -1,10 +1,10 @@
-# EXPERIMENT — hypothesis spec for agentic-rag-kimble
+# EXPERIMENT: hypothesis spec for agentic-rag-kimble
 
 Date drafted: 2026-05-20.
 Authority: this document, not the plan. `docs/EXPERIMENT-PLAN.md`
 captures *how* the experiment is run; this document captures *what is
 being tested and what would falsify it*. If the plan and the spec
-disagree on hypothesis, metric, or falsification, the spec wins —
+disagree on hypothesis, metric, or falsification, the spec wins;
 amend it explicitly rather than drift.
 
 ## 1. Hypothesis
@@ -56,10 +56,10 @@ recall@10(system, holdout) = mean_over_fixtures(recall@10(fixture))
 
 Two systems are compared on the same held-out set:
 
-- **System D (dimensional)** — the production agent with all three
+- **System D (dimensional)**: the production agent with all three
   tools (`graph_query`, `semantic_search`, `aggregate_measures`)
   against the Kimball-modelled LadybugDB store.
-- **System F (flat-RAG)** — a baseline implemented in Phase 4. Each
+- **System F (flat-RAG)**: a baseline implemented in Phase 4. Each
   graph entity (Run, Algorithm, Dataset, Task) is serialised to a
   single text chunk, embedded with the same BGE-small model, indexed
   in a single vector store. Retrieval is `semantic_search` only,
@@ -74,7 +74,7 @@ content.
 ## 3. Statistical method
 
 Bootstrap confidence interval, BCa (bias-corrected and accelerated),
-10 000 resamples, α = 0.05 — so a two-sided 95% CI.
+10 000 resamples, α = 0.05, so a two-sided 95% CI.
 
 - **Resampling unit:** the fixture. Resample the held-out fixture set
   with replacement, recompute mean recall@10 per resample, derive the
@@ -104,7 +104,7 @@ the held-out set:
    stratifies into three query classes (graph-traversal, semantic-
    only, aggregation). If on any one class the per-class Δ point
    estimate is *negative* (System D worse than System F), the
-   hypothesis as stated above is falsified — even if the aggregate is
+   hypothesis as stated above is falsified, even if the aggregate is
    positive. A negative class would mean dimensional structure is
    actively *harming* one query type, which the hypothesis does not
    accommodate.
@@ -122,7 +122,7 @@ the generalisation claim in C1.
 
 ## 5. Secondary outcomes (reported, not bet on)
 
-- **`recall@5` on held-out** — same methodology, narrower retrieval
+- **`recall@5` on held-out**: same methodology, narrower retrieval
   window. Reports whether the lift narrows or grows under tighter
   budgets.
 - **Per-tool-class recall@10 on held-out**, three buckets:
@@ -130,29 +130,29 @@ the generalisation claim in C1.
   - semantic: questions that depend on vague-name lookup
   - aggregate: questions that require grouped measures
 - **Judge grounding** (from `src/eval/judge.py`, post-FU1 rubric):
-  per-fixture grounding score 1–4 with the post-FU1 strict-grounding
+  per-fixture grounding score 1–5 with the post-FU1 strict-grounding
   prompt. Pre-FU1 was 2.40; pass-28 lifted to 3.00; the 3.5+ target
   is still open. Reported as context; no falsification claim.
-- **Tool-call count per query** — average tool invocations per
+- **Tool-call count per query**: average tool invocations per
   fixture. Reported for cost framing. Higher is not necessarily worse.
 
 ## 6. Corollary tests
 
-### C1 — generalisation gesture (Phase 6)
+### C1: generalisation gesture (Phase 6)
 
 Repeat the primary comparison on the arXiv ML metadata corpus, with a
 Kimball schema built per the §J.3 sketch: `Paper` (fact-ish),
 `Author`, `Venue`, `Date`, `Topic/Category` (dim). Same retrieval
 methodology, same bootstrap CI. C1 is supported if Δ on arXiv is
 positive with CI excluding 0. Effect size is allowed to be smaller
-than on OpenML — arXiv is a softer test because the questions are
+than on OpenML; arXiv is a softer test because the questions are
 less naturally aggregation-shaped.
 
 Honest caveat for the write-up: arXiv is adjacent to OpenML in
 domain (both ML literature / metadata). The C1 result is a *gesture*
 toward generalisation, not a domain-wide claim.
 
-### C2 — tool ablation (Phase 5)
+### C2: tool ablation (Phase 5)
 
 Run System D in three ablated configurations on held-out:
 - D−agg: `aggregate_measures` disabled
@@ -168,7 +168,7 @@ does not actually exercise those tools.
 
 ## 7. Fixture set and held-out split
 
-- Current fixture set: 24 (pass 28). Expanded in Phase 2 to a target
+- Current fixture set: 20 (pass 28). Expanded in Phase 2 to a target
   of 60–100 fixtures across the three query classes (graph, semantic,
   aggregate) in roughly equal thirds.
 - Held-out split: 30% of fixtures, stratified by query class, randomly
@@ -214,7 +214,7 @@ Any analysis added post-hoc is reported in Phase 8 explicitly as
 
 ## 10. Provenance and reproducibility
 
-- All commits land on `pass-29` with per-task attribution
+- All commits land on the current branch with per-task attribution
   (`Author: <worker model>`, `Co-Authored-By: <verifier>`,
   `Verified-By: <verifier>`). The cross-family verifier is Codex
   GPT-5.5 for Claude-Sonnet workers and vice versa, per §D of the
@@ -225,8 +225,8 @@ Any analysis added post-hoc is reported in Phase 8 explicitly as
 - Fixture splits use a committed seed; bootstrap resamples use a
   committed seed. Reproducible from the commit hash that contains
   the final `runs/eval/` outputs.
-- The baseline (System F) is implemented twice — once by Sonnet and
-  once independently by Codex GPT-5.5 — and the two must agree
+- The baseline (System F) is implemented twice (once by Sonnet and
+  once independently by Codex GPT-5.5) and the two must agree
   numerically to 3 decimal places on a small reference fixture
   before Phase 4 is allowed to claim its result. Implementation
   disagreement is itself a finding.
@@ -234,7 +234,7 @@ Any analysis added post-hoc is reported in Phase 8 explicitly as
 ## 11. Open decisions still to pin (before Phase 4 runs)
 
 - **Δ_min sensitivity.** §4.1 sets Δ_min = 0.05. Should this be
-  smaller (0.02 — any non-trivial lift counts) or larger (0.10 —
+  smaller (0.02: any non-trivial lift counts) or larger (0.10:
   insists on a clear win)? Current 0.05 is the proposal; revisit
   after seeing pilot numbers on the dev split if needed, but lock
   before held-out runs.

@@ -64,7 +64,7 @@ BELONGS_TO_FAMILY
 **Fact:** `Run`  
 **Dimensions:** `Algorithm`, `Dataset`, `Task`, `Date`  
 **Snowflake outrigger:** `AlgorithmFamily` off `Algorithm`  
-**Measures:** accuracy, weighted_F1, AUC_ROC, runtime_sec (sparse by run)
+**Measures:** accuracy, f1, auc, runtime_sec (sparse by run)
 
 ---
 
@@ -152,7 +152,7 @@ rolls the log into a report. The table below is a frozen sample of real runs
 | Which algorithm family works best on datasets with severe class imbalance? | 8 | 7 | 86.4 | $0.136 |
 
 Across these runs the agent averages ~10 turns, ~11 tool calls, ~82 s, and
-~$0.17/query. Cost is the SDK's notional figure — actual inference runs against
+~$0.17/query. Cost is the SDK's notional figure; actual inference runs against
 Max-subscription quota via OAuth, not metered API billing. Heavy cache reads
 (150k–250k input tokens vs ~3–5k output) reflect the system prompt and tool
 schemas being re-sent each turn of the agent loop.

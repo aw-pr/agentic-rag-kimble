@@ -19,7 +19,7 @@ import yaml
 
 @dataclass(frozen=True)
 class BudgetConfig:
-    """Defaults match runs/experiment/budget.yaml.example. The dataclass
+    """Defaults match config/experiment/budget.yaml.example. The dataclass
     is frozen so the tick cannot accidentally mutate budgets mid-run."""
 
     per_task_subagent_cap: int = 3

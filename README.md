@@ -13,14 +13,14 @@
 
 ## What it does
 
-- Queries 171,250 OpenML experimental runs using a LadybugDB property graph (Cypher) and native HNSW vector index — single embedded store, no separate vector database. 
+- Queries 171,250 OpenML experimental runs using a LadybugDB property graph (Cypher) and native HNSW vector index: single embedded store, no separate vector database. 
 - Applies Ralph Kimball's dimensional modelling to the knowledge graph: `Run` is the fact node; `Algorithm`, `Dataset`, and `Task` are dimension nodes with vector-embedded descriptions, alongside a conformed `Date` dimension; `AlgorithmFamily` is a snowflaked outrigger sub-dimension off `Algorithm`
 - Routes each user query to the appropriate retrieval strategy -- structured lookup, semantic similarity, or aggregate analysis -- via a Claude Agent SDK orchestrator (OAuth via Claude Code session; costs charge against Max subscription quota, no API billing)
 - Scores retrieval quality offline via a 20-fixture recall harness; response quality is scored live by a `claude-haiku-4-5` LLM judge sampled at 5 fixtures per run
 
-![Agentic Kimble answering "the most successful algorithm with low-volume, low-dimensional data" — the agent maps the informal question onto the size and dimensionality dimensions, then aggregates accuracy across runs](images/demo-harness-screen-sh.png "Agent harness UI")
+![Agentic Kimble answering "the most successful algorithm with low-volume, low-dimensional data": the agent maps the informal question onto the size and dimensionality dimensions, then aggregates accuracy across runs](images/demo-harness-screen-sh.png "Agent harness UI")
 
-> **Heads-up on quota.** Each query may chain several tool calls. The default budget is `agent_max_tool_calls = 15` (about 47 SDK turns); a complex question can burn that and still hit the cap. Bump it in `src/config.py` only when you need to — every extra turn is a real call against your Max quota.
+> **Heads-up on quota.** Each query may chain several tool calls. The default budget is `agent_max_tool_calls = 15` (about 47 SDK turns); a complex question can burn that and still hit the cap. Bump it in `src/config.py` only when you need to; every extra turn is a real call against your Max quota.
 
 ---
 
@@ -47,7 +47,7 @@ flowchart LR
 
 LadybugDB is the community continuation of Kùzu following Apple's acqui-hire in early 2025. All three agent tools -- graph query, semantic search, and aggregate measures -- operate against a single embedded LadybugDB instance. The `VECTOR` extension provides the native HNSW index on dimension-node descriptions; ChromaDB is not used.
 
-> For the design discussion behind these choices — how this scales, how the dimensional model copes with drift, how the project compares with flat RAG and long-context approaches, and where the wider RAG market is heading — see [docs/discussion.md](docs/discussion.md).
+> For the design discussion behind these choices (how this scales, how the dimensional model copes with drift, how the project compares with flat RAG and long-context approaches, and where the wider RAG market is heading), see [docs/discussion.md](docs/discussion.md).
 
 ---
 
@@ -107,7 +107,7 @@ The full ingest of 500 datasets and up to 500 runs per dataset produces approxim
 
 ## Example output
 
-Query from the aggregate fixture set:
+Query from the aggregate fixture set. The block shows the output shape only; its numbers are illustrative and are not from a real run.
 
 ```
 Query: which algorithm family has the highest median accuracy on classification tasks
@@ -134,16 +134,16 @@ a gap consistent with the broader OpenML literature on tabular data.
 
 ### Retrieval eval
 
-Run against 20 query-to-entity fixtures rebuilt from scratch against the actual 500-dataset / 1588-algorithm corpus (pass 24). Each fixture's expected entities were verified to exist in the live DB before authoring. No broadening after the fact. The pass-28 OpenML free-form description backfill lifted semantic recall as predicted at the pass-27 handoff:
+Run against 20 query-to-entity fixtures rebuilt from scratch against the actual 500-dataset / 1588-algorithm corpus (pass 24; a "pass" is one numbered development iteration of this project). Each fixture's expected entities were verified to exist in the live DB before authoring. No broadening after the fact. The pass 28 OpenML free-form description backfill lifted semantic recall as predicted at the pass 27 handoff:
 
-| Metric    | pass-27 | pass-28   |
+| Metric    | pass 27 | pass 28   |
 | --------- | ------- | --------- |
 | recall@5  | 0.850   | **0.900** |
 | recall@10 | 0.900   | **0.950** |
 
 Per-tool breakdown (recall@10):
 
-| Tool      | pass-27 | pass-28   |
+| Tool      | pass 27 | pass 28   |
 | --------- | ------- | --------- |
 | aggregate | 1.000   | 1.000     |
 | graph     | 1.000   | 1.000     |
@@ -161,18 +161,18 @@ To regenerate:
 
 The LLM judge (`src/eval/judge.py`) evaluates three dimensions per response: grounding (claims traceable to retrieved run IDs or entity names), reasoning quality, and answer completeness. Judge model: `claude-haiku-4-5-20251001`. Sampled at 5 fixtures per run to limit cost.
 
-The pass-20 grounding score was depressed by a harness gap, not agent hallucination: the judge received only bare entity names, not the tool-call results the agent actually used. That gap was closed in two steps -- pass-23 wired full tool-call context into the judge, and pass-27 added the actual tool *results* (not just inputs) so quantitative claims can be verified against real data.
+The pass 20 grounding score was depressed by a harness gap, not agent hallucination: the judge received only bare entity names, not the tool-call results the agent actually used. That gap was closed in two steps -- pass 23 wired full tool-call context into the judge, and pass 27 added the actual tool *results* (not just inputs) so quantitative claims can be verified against real data.
 
-With an honest judge in place, it began catching real defects -- the agent inflating counts and inventing flow IDs. The pass-28 strict grounding rule in `src/agent/prompts.py` targets exactly that. Sampled means (5 fixtures), before and after the rule:
+With an honest judge in place, it began catching real defects -- the agent inflating counts and inventing flow IDs. The pass 28 strict grounding rule in `src/agent/prompts.py` targets exactly that. Sampled means (5 fixtures), before and after the rule:
 
-| Dimension    | pass-27 | pass-28  |
+| Dimension    | pass 27 | pass 28  |
 | ------------ | ------- | -------- |
 | Grounding    | 2.4     | **3.00** |
 | Reasoning    | --      | 3.00     |
 | Completeness | --      | 2.80     |
 | Overall      | 2.60    | **2.92** |
 
-The grounding rule produced a real lift (2.4 -> 3.00) but did not reach the 3.5+ target set at the pass-27 handoff -- reported as measured, not rounded up. Further grounding work is a live follow-up.
+The grounding rule produced a real lift (2.4 -> 3.00) but did not reach the 3.5+ target set at the pass 27 handoff -- reported as measured, not rounded up. Further grounding work is a live follow-up.
 
 ---
 
@@ -207,9 +207,9 @@ Build provenance: per-pass retrospectives are in `runs/build-log/`. The `runs/` 
 
 ## Limitations and known issues
 
-**Recall ceiling context.** recall@10 = 0.950 on the 20-fixture set (pass 28). Fixtures rebuilt from scratch against the actual corpus; no broadening. The single remaining failure is a description-vocabulary gap for `HistGradientBoostingClassifier`. See `runs/build-log/pass-28-snowflake-and-green-gate.md`.
+**Recall ceiling context.** recall@10 = 0.950 on the 20-fixture set (pass 28). Fixtures rebuilt from scratch against the actual corpus; no broadening. The single remaining failure is a description-vocabulary gap for `HistGradientBoostingClassifier`. See `runs/build-log/pass-28-snowflake-and-green-gate.md` (not published).
 
-**OpenML backfill segfault (FU2).** The overnight backfill segfaulted (`rc=139`) on 14 May. Six escalating repro attempts in pass 30, up to a full-scale backfill against a copy of the store, did not reproduce it, so no root cause is claimed; the most likely trigger is a stale LadybugDB write-ahead log left by an earlier force-killed run. Mitigated, not fixed: description writes now bind `$description` as a parameter instead of interpolating it into Cypher, and `scripts/backfill-openml-descriptions.sh` checkpoints after every 50-entity batch, so a crashed run resumes without re-fetching or re-writing committed batches. See `runs/build-log/pass-30-fu2-note.md`.
+**OpenML backfill segfault (FU2).** The overnight backfill segfaulted (`rc=139`) on 14 May. Six escalating repro attempts in pass 30, up to a full-scale backfill against a copy of the store, did not reproduce it, so no root cause is claimed; the most likely trigger is a stale LadybugDB write-ahead log left by an earlier force-killed run. Mitigated, not fixed: description writes now bind `$description` as a parameter instead of interpolating it into Cypher, and `scripts/backfill-openml-descriptions.sh` checkpoints after every 50-entity batch, so a crashed run resumes without re-fetching or re-writing committed batches. See `runs/build-log/pass-30-fu2-note.md` (not published).
 
 **Judge grounding below target.** The grounding rule lifted the sampled grounding score from 2.4 to 3.00 (pass 28), short of the 3.5+ target. Closing that gap is the main open response-quality follow-up.
 
@@ -219,11 +219,11 @@ Build provenance: per-pass retrospectives are in `runs/build-log/`. The `runs/` 
 
 ## Next steps
 
-Surfaced by the May 2026 four-way independent reviewer benchmark (`runs/reviews/`) and prioritised against the limitations above. Each item is an open thread, not committed scope.
+Surfaced by the May 2026 four-way independent reviewer benchmark (`runs/reviews/`, not published) and prioritised against the limitations above. Each item is an open thread, not committed scope.
 
 - **Reproduce the eval against a non-OpenML corpus.** OpenML is friendly because it was Kimball-shaped to begin with. A pilot on Jira + GitHub events, or PagerDuty + deploys, would test whether the dimensional retrieval pattern transfers to messy enterprise systems with mutable taxonomies and partial observability. Highest-leverage credibility move per the leader reviewers.
 - **Operational reality section.** On-call story, failure modes when ingest segfaults mid-overnight (FU2 above), per-query latency distribution under concurrent load. The current README is sized for a laptop demo; a 140-engineer adoption needs a duty-rota answer.
-- **Validate the schema migration framework in anger.** The migration index (`docs/MIGRATIONS.md`, `src/graph/migrations/`) ships in pass-29 but no real second migration has yet run. The next time a dimension attribute changes is the trial.
+- **Validate the schema migration framework in anger.** The migration index (`docs/MIGRATIONS.md`, `src/graph/migrations/`) ships in pass 29 but no real second migration has yet run. The next time a dimension attribute changes is the trial.
 - **Close the grounding gap to ≥3.5.** Sampled grounding score sits at 3.0; the target is 3.5+. Most likely route is judge-side context expansion plus a prompt-level constraint on tool-result citation density.
 - **Demonstrate routing discipline.** When the agent uses structured tools vs semantic retrieval vs (eventually) long-context fallback, with observed accuracy and latency by question class. Would make the architectural bet legible to a reviewer who runs the harness once.
 
@@ -239,5 +239,5 @@ MIT. See `LICENSE`.
 
 | Version | Date | Summary |
 |---|--:|---|
-| v0.3.1 | 2026-11-15 | Agent default model to `claude-sonnet-5`; experiment workers to GPT-5.6 Sol; checkpointed, resumable OpenML description backfill; publish guards (protected `publish` branch, PR-only public boundary, `scripts/publish-sync.sh`); docs corrected against the code. |
+| v0.3.1 | 2026-11-15 | Agent default model to `claude-sonnet-5`; experiment verifiers to GPT-5.6 Sol; checkpointed, resumable OpenML description backfill; publish guards (protected `publish` branch, PR-only public boundary, `scripts/publish-sync.sh`); docs corrected against the code. |
 | v0.3.0 | 2026-06-08 | Snowflaked `AlgorithmFamily` outrigger, Kùzu→LadybugDB rename, OpenML description binding (FU2), and cost/telemetry reporting. |

@@ -8,8 +8,10 @@
 #
 # Per-repo config (git config, local, never committed — keeps org/repo names
 # out of the tracked tree):
-#   publishguard.publicmatch   Substring of the PUBLIC remote URL (e.g.
-#                              "myorg/myrepo"). Unset -> this hook is inert.
+#   publishguard.publicmatch   Identifies the PUBLIC remote (e.g.
+#                              "myorg/myrepo"). Matched case-insensitively as a
+#                              substring of the push URL, both normalised (see
+#                              normalise_remote). Unset -> this hook is inert.
 #   publishguard.sentinel      Env var the sanctioned publish path sets to 1.
 #                              Default: PUBLISH_GUARD_OK
 #   publishguard.historymode   preserve (default) | squash. Informational here;
@@ -30,13 +32,20 @@
 #                              mode keeps the sentinel-only gate for repos that
 #                              opt out.
 #
-# On the public remote: only the default branch (main/master) may be pushed,
+# On the public remote: deleting the default branch (main/master) is always
+# refused, whatever the sentinel or boundary. Only the default branch may be pushed,
 # AND that push must arrive via the sanctioned path (sentinel env set) — i.e.
 # `git publish`, which backs up to the private remote first. A direct
 # `git push <public> dev:main` is blocked so it cannot skip that backup.
 # Non-fast-forward pushes to the public default branch are rejected even with
-# the sentinel set ("PUB/main is immutable"). A push whose tree still contains
-# a private file is rejected.
+# the sentinel set ("PUB/main is immutable"). A push is rejected when the
+# pushed tip's tree contains a private file, or when any commit the push adds
+# to the remote has one in its tree, so a private file added and later removed
+# cannot reach public history. A commit the remote already holds (its old sha,
+# or anything under this remote's tracking refs) is not judged again, and a
+# commit that only deletes a private file passes. A remote sha this repo does
+# not have never shrinks the scan: fetch the remote first if the history it
+# would otherwise exclude is already public.
 #
 # The PR-source branch (publishguard.prsource) is also allowed on the public
 # remote — this is the "publish-pr" fast-forward-free path: push `publish` as
@@ -44,8 +53,9 @@
 # merging on GitHub. It does NOT require the sentinel (it isn't the sanctioned
 # main-publish path — the PR review is the safeguard there) and is not subject
 # to the ff-only check (it's an ordinary branch, not the immutable public
-# default). It STILL runs the private-file tree scan: a privatefile leak on
-# the PR source must be rejected exactly like on main, fail-closed. Any other
+# default). It STILL runs the private-file scan of the tip and of every pushed
+# commit: a privatefile leak on the PR source must be rejected exactly like on
+# main, fail-closed. Any other
 # non-default ref is still rejected.
 # Optional chain point: scripts/publish-guard-strict-scan.sh (runs if present).
 # Deliberate one-off override: git push --no-verify
@@ -60,10 +70,24 @@ if [ -n "$repo_root" ] && [ -x "$repo_root/scripts/publish-guard-strict-scan.sh"
   "$repo_root/scripts/publish-guard-strict-scan.sh" || exit $?
 fi
 
+# Normalised spelling of a remote URL or of publishguard.publicmatch, so one
+# repository matches however its URL is written: lowercase; scheme, user@,
+# trailing / and trailing .git dropped; scp-style host:path read as host/path.
+# Kept identical in templates/git-hooks/pre-push and scripts/git-push-check.
+normalise_remote() {
+  local u
+  u="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  u="${u#*://}"
+  case "${u%%/*}" in *@*) u="${u#*@}" ;; esac
+  case "$u" in *:*) u="${u%%:*}/${u#*:}" ;; esac
+  u="${u%/}"; u="${u%.git}"; u="${u%/}"
+  printf '%s' "$u"
+}
+
 pub_match="$(git config --get publishguard.publicmatch || true)"
 [ -z "$pub_match" ] && exit 0                 # not configured -> nothing to guard
-case "$remote_url" in
-  *"$pub_match"*) : ;;                         # public — restricted below
+case "$(normalise_remote "$remote_url")" in
+  *"$(normalise_remote "$pub_match")"*) : ;;   # public — restricted below
   *) exit 0 ;;                                 # private/backup — allow everything
 esac
 
@@ -75,6 +99,10 @@ history_mode="$(git config --get publishguard.historymode || true)"
 # Private files that must never reach the public tree (repeatable git config).
 private_files="$(git config --get-all publishguard.privatefile || true)"
 [ -z "$private_files" ] && private_files="HANDOFF.md"
+private_specs=()
+while IFS= read -r pf; do
+  [ -n "$pf" ] && private_specs+=("${pf%/}")
+done <<< "$private_files"
 
 # PR-source branch for the publish-pr flow. Defaults to publishbranch (empty
 # publishbranch -> empty pr_source -> the case pattern below matches nothing,
@@ -113,11 +141,58 @@ check_privatefile() {
   return 0
 }
 
+# Reject the push if any commit it adds to the remote carries a private path in
+# its tree. Added means reachable from the pushed sha and from neither the
+# remote's old sha (when that is a commit here) nor any of this remote's
+# tracking refs. A new ref, or an old sha this repo lacks, only drops out of
+# the exclusions; it never shrinks the scan. Each commit's whole tree is
+# judged rather than the paths it touches, so a commit that only deletes a
+# private file passes. Any git failure here blocks.
+check_pushed_commits() {
+  sha="$1"
+  old="$2"
+  ref="$3"
+  [ "$sha" = "$zero" ] && return 0
+  [ "${#private_specs[@]}" -eq 0 ] && return 0
+  exclude=()
+  if [ "$old" != "$zero" ] && git cat-file -e "${old}^{commit}" 2>/dev/null; then
+    exclude+=("$old")
+  fi
+  [ -n "$remote_name" ] && exclude+=("--remotes=$remote_name")
+  if ! pushed="$(git rev-list "$sha" --not "${exclude[@]}" 2>/dev/null)"; then
+    echo "pre-push: cannot list the commits pushed to PUBLIC '$ref' — blocked." >&2
+    return 1
+  fi
+  while IFS= read -r c; do
+    [ -z "$c" ] && continue
+    if ! found="$(git -c core.quotePath=false --literal-pathspecs ls-tree -r --name-only "$c" -- "${private_specs[@]}" 2>/dev/null)"; then
+      echo "pre-push: cannot read commit $c pushed to PUBLIC '$ref' — blocked." >&2
+      return 1
+    fi
+    if [ -n "$found" ]; then
+      echo "pre-push: private path(s) in commit $(git log -1 --format='%h %s' "$c" 2>/dev/null || echo "$c")," >&2
+      echo "          which this push adds to PUBLIC '$ref' — blocked:" >&2
+      printf '%s\n' "$found" | sed 's/^/            /' >&2
+      echo "          A private file must not enter public history, even if a" >&2
+      echo "          later commit removes it. If that history is already public," >&2
+      echo "          fetch the remote first (git fetch $remote_name) so it is not" >&2
+      echo "          judged again. Deliberate override: --no-verify." >&2
+      return 1
+    fi
+  done <<< "$pushed"
+  return 0
+}
+
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     "")
       : ;;
     refs/heads/main|refs/heads/master)
+      if [ "$local_sha" = "$zero" ]; then
+        echo "pre-push: deleting '$remote_ref' on PUBLIC remote '$remote_name' blocked." >&2
+        echo "          The public default branch is never deleted by a push." >&2
+        exit 1
+      fi
       if [ "${!sentinel:-}" != "1" ]; then
         echo "pre-push: direct publish to PUBLIC remote '$remote_name' blocked." >&2
         echo "          Run 'git publish' — it backs up to the private remote" >&2
@@ -162,6 +237,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       fi
       # Private files must not exist in the tree being published.
       check_privatefile "$local_sha" "$remote_ref" || exit 1
+      check_pushed_commits "$local_sha" "$remote_sha" "$remote_ref" || exit 1
       ;;
     refs/heads/"$pr_source")
       # PR-for-publish source path: `publish` (or configured prsource) pushed
@@ -169,8 +245,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       # No sentinel required — this isn't the sanctioned main-publish path,
       # the PR review is the safeguard here. No ff-only check — this is an
       # ordinary branch, not the immutable public default. The private-file
-      # scan still runs, fail-closed, same as the main-publish path.
+      # scans still run, fail-closed, same as the main-publish path.
       check_privatefile "$local_sha" "$remote_ref" || exit 1
+      check_pushed_commits "$local_sha" "$remote_sha" "$remote_ref" || exit 1
       ;;
     *)
       echo "pre-push: '$remote_ref' blocked on PUBLIC remote '$remote_name'." >&2

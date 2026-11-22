@@ -58,10 +58,41 @@ git config --get publishguard.historymode >/dev/null 2>&1 \
 pub_match="$(git config --get publishguard.publicmatch || true)"
 pub_remote="$(git config --get publishguard.publicremote || true)"
 priv_remote="$(git config --default origin --get publishguard.privateremote)"
-# The local branch that fast-forwards onto the public default branch.
-# Deterministic + portable across machines (don't infer from HEAD).
+# The local branch that is published. Deliberately never inferred from HEAD:
+# an alias guessed from whatever was checked out at arm time publishes the
+# wrong line.
 pub_branch="$(git config --get publishguard.publishbranch || true)"
-[ -z "$pub_branch" ] && pub_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo publish)"
+# Same defaults as pre-push: PR boundary, PR source = the publish branch.
+boundary="$(git config --default pr --get publishguard.boundary)"
+pr_source="$(git config --get publishguard.prsource || true)"
+[ -z "$pr_source" ] && pr_source="$pub_branch"
+
+# set_alias <name> <wanted> [<value an earlier install wrote>...]
+# Writes when unset or stale; keeps anything else as hand-written, with a warning.
+set_alias() {
+  local name="$1" want="$2" have stale
+  shift 2
+  have="$(git config --get "alias.$name" || true)"
+  if [ -z "$have" ]; then
+    git config "alias.$name" "$want"
+    echo "install-guards: set 'git $name' alias"
+    return
+  fi
+  if [ "$have" = "$want" ]; then
+    echo "install-guards: 'git $name' alias already current — left untouched"
+    return
+  fi
+  for stale in "$@"; do
+    if [ "$have" = "$stale" ]; then
+      git config "alias.$name" "$want"
+      echo "install-guards: replaced the 'git $name' alias an earlier install wrote"
+      return
+    fi
+  done
+  echo "install-guards: WARN 'git $name' alias is hand-written — left as it is." >&2
+  echo "  install-guards would have written: $want" >&2
+  echo "  to take that value: git config --unset alias.$name && bash scripts/install-guards.sh" >&2
+}
 
 if [ -z "$pub_match" ] || [ -z "$pub_remote" ]; then
   echo "install-guards: publish gate INERT — set the public remote once:"
@@ -69,14 +100,23 @@ if [ -z "$pub_match" ] || [ -z "$pub_remote" ]; then
   echo "  git config publishguard.publicremote 'YOUR_PUBLIC_REMOTE_NAME'"
   echo "  git config publishguard.publishbranch 'publish'   # local line that ff's to main"
   echo "  git config publishguard.privateremote 'origin'    # optional, default origin"
+elif [ -z "$pub_branch" ]; then
+  echo "install-guards: no publish aliases written — publishguard.publishbranch is unset."
+  echo "  Set the local line that is published, then re-run this installer:"
+  echo "  git config publishguard.publishbranch 'publish'"
 else
   sentinel="$(git config --get publishguard.sentinel)"
-  want_alias="!git push ${priv_remote} ${pub_branch} && ${sentinel}=1 git push ${pub_remote} ${pub_branch}:main"
-  if [ "$(git config --get alias.publish || true)" != "$want_alias" ]; then
-    git config alias.publish "$want_alias"
-    echo "install-guards: set 'git publish' alias (${priv_remote} ${pub_branch} → ${pub_remote} main)"
+  pr_message="Next: gh pr create --base main --head ${pr_source}   then read the diff on the forge and merge it there."
+  pr_flow="!git push ${priv_remote} ${pub_branch} && git push ${pub_remote} ${pub_branch}:${pr_source} && echo '${pr_message}'"
+  direct_flow="!git push ${priv_remote} ${pub_branch} && ${sentinel}=1 git push ${pub_remote} ${pub_branch}:main"
+
+  set_alias publish-pr "$pr_flow"
+  if [ "$boundary" = "direct" ]; then
+    set_alias publish "$direct_flow" "$pr_flow"
+    echo "install-guards: boundary = direct — 'git publish' fast-forwards ${pub_remote} main; 'git publish-pr' opens the PR flow"
   else
-    echo "install-guards: 'git publish' alias already current — left untouched"
+    set_alias publish "$pr_flow" "$direct_flow"
+    echo "install-guards: boundary = ${boundary} — the PR flow pushes ${pub_branch} to ${pub_remote} ${pr_source}; public main advances only by a merge on the forge"
   fi
 fi
 

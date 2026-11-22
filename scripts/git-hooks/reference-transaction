@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Publish guard — reference-transaction. Refuses any move of a protected branch
+# to a commit that no other branch and no remote already holds.
+#
+# CANONICAL SOURCE: mcp-hub/templates/git-hooks/reference-transaction.
+# Do NOT edit the per-repo copy under scripts/git-hooks/ — edit this template
+# and re-sync (mcp-hub/scripts/sync-all-platforms.sh), then re-arm each repo
+# with scripts/install-guards.sh.
+#
+# pre-commit only sees `git commit`. cherry-pick, revert, rebase, am and
+# `git commit --no-verify` all land new commits without it, so this hook judges
+# the ref move itself. Protected set: the union of releasetrain.protectedbranch
+# and publishguard.publishbranch, defaulting to `publish` when neither is set
+# (the same set pre-commit uses).
+#
+# For each update of refs/heads/<protected> it allows:
+#   - a deletion, or a no-op;
+#   - a publish branch while CHERRY_PICK_HEAD exists (the sanctioned
+#     cherry-pick across onto an orphan publish line; release trunks get no
+#     exemption);
+#   - a new value already contained in a branch that is not protected, or in a
+#     remote-tracking ref: `merge --ff-only`, publish-sync's `git branch -f`
+#     from its scratch branch, a fast-forward to what a remote holds, creating
+#     a branch.
+# This is a containment rule, not a fast-forward rule: moving a protected
+# branch back, or across, to a commit another branch or a remote already holds
+# creates no new work there. A non-fast-forward push is judged at push time by
+# git-push-check.
+#
+# Runs on every ref update (git fetch included), while git holds the ref locks:
+# it acts only in the `prepared` state, exits before any git call when no
+# refs/heads/ line is present, and never writes a ref.
+#
+# Override once, deliberately: PROTECTED_BRANCH_OK=1 <git command>
+
+state="${1:-}"
+
+# Drain stdin in every state, so the writer never meets a closed pipe.
+heads=""
+while IFS=' ' read -r old new ref || [ -n "$ref" ]; do
+  case "$ref" in
+    refs/heads/*) heads="${heads}${old} ${new} ${ref}
+" ;;
+  esac
+done
+
+[ "$state" = "prepared" ] || exit 0
+[ -n "$heads" ] || exit 0
+[ "${PROTECTED_BRANCH_OK:-}" = "1" ] && exit 0
+
+release_branches="$(git config --get-all releasetrain.protectedbranch 2>/dev/null)"
+publish_branches="$(git config --get-all publishguard.publishbranch 2>/dev/null)"
+if [ -z "$(printf '%s%s' "$release_branches" "$publish_branches" | tr -d '[:space:]')" ]; then
+  publish_branches="publish"
+fi
+protected_branches="$(printf '%s\n%s\n' "$release_branches" "$publish_branches")"
+
+# in_list NEEDLE LIST: LIST holds one branch name per line.
+in_list() {
+  local item
+  while IFS= read -r item; do
+    [ -n "$item" ] && [ "$item" = "$1" ] && return 0
+  done <<EOF
+$2
+EOF
+  return 1
+}
+
+# held_elsewhere SHA: SHA is contained in an unprotected local branch or in a
+# remote-tracking ref. A failed lookup counts as not held.
+held_elsewhere() {
+  local holders h
+  holders="$(git for-each-ref --contains "$1" --format='%(refname)' refs/heads refs/remotes 2>/dev/null)" \
+    || return 1
+  while IFS= read -r h; do
+    case "$h" in
+      '') continue ;;
+      refs/heads/*) in_list "${h#refs/heads/}" "$protected_branches" && continue ;;
+    esac
+    return 0
+  done <<EOF
+$holders
+EOF
+  return 1
+}
+
+cherry_pick=0
+if git rev-parse --verify --quiet CHERRY_PICK_HEAD >/dev/null 2>&1; then
+  cherry_pick=1
+fi
+
+refused=0
+while IFS=' ' read -r old new ref; do
+  [ -z "$ref" ] && continue
+  branch="${ref#refs/heads/}"
+  in_list "$branch" "$protected_branches" || continue
+  [ "$new" = "$old" ] && continue
+  case "$new" in *[!0]*) ;; *) continue ;; esac
+  if [ "$cherry_pick" -eq 1 ] && in_list "$branch" "$publish_branches"; then
+    continue
+  fi
+  held_elsewhere "$new" && continue
+
+  echo "reference-transaction: refusing to move protected branch '$branch' to ${new}." >&2
+  echo "  A protected branch only takes work another branch or a remote already holds:" >&2
+  echo "  make the commit on a working branch, then git merge --ff-only it onto '$branch'." >&2
+  echo "  Abort the command in progress (git cherry-pick --abort, git revert --abort," >&2
+  echo "  git rebase --abort, git am --abort) and redo the work there." >&2
+  echo "  Override once, deliberately: PROTECTED_BRANCH_OK=1 <git command>" >&2
+  refused=1
+done <<EOF
+$heads
+EOF
+
+exit "$refused"

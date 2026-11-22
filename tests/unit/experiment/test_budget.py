@@ -22,7 +22,7 @@ from src.experiment.budget import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-BUDGET_EXAMPLE = REPO_ROOT / "runs" / "experiment" / "budget.yaml.example"
+BUDGET_EXAMPLE = REPO_ROOT / "config" / "experiment" / "budget.yaml.example"
 
 
 # ---- config loading --------------------------------------------------------
