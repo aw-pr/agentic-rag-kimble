@@ -10,27 +10,27 @@ Placeholders used below: `PRIV` = your private remote (default `origin`),
 (this repo uses `publish`).
 
 **History mode for this repo:** `preserve` (since 2026-06-09). The public line
-keeps atomic, per-agent-authored commits — no per-batch squash. The two earlier
+keeps atomic, per-agent-authored commits, with no per-batch squash. The two earlier
 `release:` squashes were rebuilt into their underlying atomic commits and
 force-pushed once (incident-grade, recorded below). The mode is stored in
 `git config publishguard.historymode`.
 
 > **Topology note:** this repo's `publish` line is an **orphan** (no shared
-> ancestry with `dev` — see the seed in step 3). So publishing is not a plain
+> ancestry with `dev`; see the seed in step 3). So publishing is not a plain
 > `git merge --ff-only dev`; it is an atomic **cherry-pick** of `dev`'s new
 > commits onto `publish` with private paths stripped (see "Day-to-day"). Never
 > squash them into one commit.
 
 ## Model
 
-- **One private working repo.** Full, messy history is fine — it never goes
+- **One private working repo.** Full, messy history is fine: it never goes
   public.
 - **One public mirror**, seeded from a single sanitised **orphan** commit
   (no shared ancestry with the messy history → nothing leaks through).
 - **One permanent publish line** (`PUBLISH_BRANCH`) that fast-forwards onto the
   public default branch (`main`). It is append-only and always publish-clean.
 - **Atomic publishing.** Bring `dev`'s new public-relevant commits onto
-  `PUBLISH_BRANCH` individually (cherry-pick), private paths stripped — never
+  `PUBLISH_BRANCH` individually (cherry-pick), private paths stripped, never
   collapsed into one squash. Private-only commits are dropped; messy/pre-guard
   history never reaches the public line (the orphan seed is the firewall).
 
@@ -42,7 +42,7 @@ have collaborators, PRs, or CI that need one. The gap between your local
 
 Whatever commit `PUB/main` points at is **immutable**. Rewrite/squash freely
 *above* it (commits not yet published); never *at or below* it. Rewriting a
-published commit forces a history-rewriting push to the public remote — the
+published commit forces a history-rewriting push to the public remote, the
 exact hazard the orphan-squash exists to avoid. Treat that as an incident, not
 routine.
 
@@ -50,7 +50,7 @@ routine.
 
 1. **Back up** the full private history: `git bundle create ~/<repo>-history.bundle --all`.
 2. **Sanitise the working tree** (parameterise machine paths, move secrets to
-   gitignored `*.local`, add `.env.example`, scrub org/repo names — see
+   gitignored `*.local`, add `.env.example`, scrub org/repo names; see
    `docs/SECURITY.md`).
 3. **Orphan squash** to one clean commit:
    ```bash
@@ -81,7 +81,7 @@ routine.
    `pre-commit`/`pre-push`, seeds `.publish-guard.local`, reconciles the
    `git publish` alias from the config above).
 8. **Restore real personal patterns** in `.publish-guard.local` (install-guards
-   seeds it from the placeholder example — it is toothless until you put your
+   seeds it from the placeholder example; it is toothless until you put your
    real machine/org strings back). Verify: a planted personal string in a
    staged file is blocked by `pre-commit`.
 9. Flip the public repo to public when satisfied.
@@ -154,7 +154,7 @@ the alias only completes a publish in a repo that has opted into `direct`.
 So a hand-typed `git push PUB PUBLISH_BRANCH:main` is blocked and told to push
 the PR source and open a PR instead. Deliberate
 one-off override: `git push --no-verify`. Org/repo names live only in local
-`git config` — never in the committed tree, so this file stays publishable.
+`git config`: never in the committed tree, so this file stays publishable.
 
 Why fail-closed, not a warning: publishing is effectively irreversible (objects
 stay fetchable by SHA, content gets cached/indexed). A guardrail for an
@@ -166,19 +166,19 @@ narrate the mistake as it completes.
 Two ways to keep the public mirror clean, picked once per repo and recorded at
 the top of this file.
 
-**`squash` (default)** — orphan-squash seed; `git merge --squash wip/x` for
+**`squash` (default)**: orphan-squash seed; `git merge --squash wip/x` for
 every merge so the publish line is one-commit-per-topic. Right when the
 private history carries secrets/absolute paths/personal positioning copy that's
 painful to scrub commit-by-commit, or when the pivots aren't part of the story.
 
-**`preserve`** — sanitise the *full* history with `git filter-repo` (paths,
+**`preserve`**: sanitise the *full* history with `git filter-repo` (paths,
 secrets, personal positioning copy scrubbed across every commit), then push as the seed.
 Ongoing merges use `git merge --no-ff wip/x` so per-agent authors, atomic
 commits, and pivots survive on the public mirror. Right when the repo was
 built with commit discipline (atomic commits, per-agent `--author=`) and the
 pivots *are* the story (portfolio value).
 
-**Preserve-readiness test** — before switching: every commit must pass the
+**Preserve-readiness test** (before switching): every commit must pass the
 pre-commit guards, not just the tip. Walk the history:
 
 ```bash
@@ -192,7 +192,7 @@ If anything trips, either `git filter-repo` until clean, or stay on `squash`.
 **Switching modes mid-life** is incident-grade for `squash → preserve` (you
 have to rebuild the squashed public commits into their atomic originals and
 force-push, which the gate blocks by default). `preserve → squash` is just "from
-now on, collapse" — no rewrite needed.
+now on, collapse": no rewrite needed.
 
 > **Done here (2026-06-09).** The two `release:` squashes (`e7e40d4`, `1452b9f`)
 > were rebuilt into the 10 atomic `dev` commits they bundled (cherry-picked onto
@@ -204,13 +204,13 @@ now on, collapse" — no rewrite needed.
 
 ### Squashing rules (both modes)
 
-- Squash *unpublished* commits at will — topic-branch `--squash` merge (best:
+- Squash *unpublished* commits at will: topic-branch `--squash` merge (best:
   the publish line stays append-only, every push is a clean ff, no force
   anywhere), or `git rebase -i <PUB/main commit>` for a quick local tidy
   (then the private push needs `--force-with-lease`).
 - Never squash/rebase commits already on `PUB/main`. The pre-push hook now
   blocks non-fast-forward pushes to public `main`/`master` even with the
-  sentinel set — override is `--no-verify`, treat that use as an incident.
+  sentinel set; override is `--no-verify`, treat that use as an incident.
 
 ## Applying to other repos
 
@@ -222,7 +222,7 @@ Nothing in the committed tree is repo-specific.
 
 Notes when porting:
 - If a repo's default public branch is `master`, the `pre-push` hook already
-  allows `main` or `master`; the alias pushes `PUBLISH_BRANCH:main` — adjust
+  allows `main` or `master`; the alias pushes `PUBLISH_BRANCH:main`; adjust
   the alias target if you want `master`.
 - A repo that already has `.env`/secrets wrappers (e.g. an `op-refs` +
   `.env.example` setup) only needs the publish-gate config + guards armed; the

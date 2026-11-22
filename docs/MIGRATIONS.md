@@ -7,10 +7,10 @@ The graph schema in `src/graph/schema.py` used to be created via `CREATE ... IF 
 ## How to write a new migration
 
 - Pick the next number and create `src/graph/migrations/NNNN_short_name.py` (four-digit zero-padded number, lower-snake-case name).
-- Export a single function `def up(conn): ...`. The argument is a live LadybugDB `Connection`; use `conn.execute(...)` directly — do not go through `GraphDB.execute`, which blocks write keywords.
+- Export a single function `def up(conn): ...`. The argument is a live LadybugDB `Connection`; use `conn.execute(...)` directly; do not go through `GraphDB.execute`, which blocks write keywords.
 - Keep each migration self-contained: do not import other migrations, and prefer raw DDL over reaching back into `NODE_TABLES`/`REL_TABLES` so the migration history stays readable even if the constants drift.
 - Add a one-paragraph docstring explaining *why* the migration exists (the schema change is visible in the diff; the motivation is not).
-- If the migration touches existing data, remember that LadybugDB is a single-writer store — there is no transactional rollback. Test on a throwaway copy of the database first.
+- If the migration touches existing data, remember that LadybugDB is a single-writer store, so there is no transactional rollback. Test on a throwaway copy of the database first.
 
 ## How the migrator runs
 
@@ -18,9 +18,9 @@ The graph schema in `src/graph/schema.py` used to be created via `CREATE ... IF 
 
 ## LadybugDB-specific gotchas
 
-- **VECTOR extension is per-process.** The runner does not call `LOAD EXTENSION VECTOR`; `GraphDB.connect()` does that once before the runner is invoked. If you write a migration that creates a vector index, you can assume the extension is loaded — but never assume the migration will be re-run in a fresh process where you might have loaded extensions yourself.
+- **VECTOR extension is per-process.** The runner does not call `LOAD EXTENSION VECTOR`; `GraphDB.connect()` does that once before the runner is invoked. If you write a migration that creates a vector index, you can assume the extension is loaded, but never assume the migration will be re-run in a fresh process where you might have loaded extensions yourself.
 - **`SET` against indexed columns is rejected.** The runner upserts the version row by `DELETE`-then-`CREATE`. If your migration needs to update an indexed value, drop the index first or rewrite the row.
-- **Single-writer.** Do not run two migration processes against the same database directory in parallel — LadybugDB's file lock will hold, but the second process will simply fail. The orchestrator and ingestion paths assume serial schema work.
+- **Single-writer.** Do not run two migration processes against the same database directory in parallel: LadybugDB's file lock will hold, but the second process will simply fail. The orchestrator and ingestion paths assume serial schema work.
 - **`NULL` arrives as `NaN`.** When the version row is brand new, `_current_version` defensively coerces the value; copy that pattern if you read scalar columns in a future migration.
 
 ## Worked example
