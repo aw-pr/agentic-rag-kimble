@@ -123,7 +123,7 @@ Online LLM judge:
 | Requirement | Target |
 |---|---|
 | Ingestion time (full scope) | ~90 min on M-series MacBook |
-| Query latency (typical) | < 15 sec |
+| Query latency (typical) | < 15 sec (not met: ~82 s average, see `docs/architecture.md`) |
 | Python version | 3.11+ |
 | No network calls at query time | Except Claude OAuth/session behaviour |
 
